@@ -31,8 +31,8 @@ pip install -r requirements.txt
 ## Milestones
 
 - [x] M0 — Setup du repo
-- [ ] M1 — Données brutes Premier League (validation, nettoyage)
-- [ ] M2 — Feature engineering (Elo, forme, head-to-head, classement 5 ans, blessures/valeur marchande)
+- [x] M1 — Données brutes Premier League (validation, nettoyage)
+- [x] M2 — Feature engineering (Elo, forme, head-to-head, classement 5 ans, blessures/valeur marchande)
 - [ ] M3 — Baseline Logistic Regression
 - [ ] M4 — MLP (PyTorch)
 - [ ] M5 — LSTM/Transformer (PyTorch)
