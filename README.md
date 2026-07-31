@@ -30,9 +30,21 @@ pip install -r requirements.txt
 
 ## Milestones
 
-- [x] M0 — Setup du repo
-- [x] M1 — Données brutes Premier League (validation, nettoyage)
-- [x] M2 — Feature engineering (Elo, forme, head-to-head, classement 5 ans, blessures/valeur marchande)
+- [x] **M0 — Setup du repo**
+  - Structure de dossiers (`data/`, `src/`, `notebooks/`, `tests/`, `configs/`)
+  - `.gitignore`, `requirements.txt`, README
+
+- [x] **M1 — Données brutes Premier League**
+  - `data/raw/premier_league_results.csv` : 1900 matchs, 5 saisons complètes (2021/22 → 2025/26, 380 matchs chacune)
+  - Saison 2025/26 complétée via `data/raw/E0_2025_26_footballdata.csv` (football-data.co.uk) : 21 matchs manquants ajoutés, 0 divergence de score sur les matchs déjà présents
+  - Validation dans `notebooks/predictor.ipynb` : 0 valeur manquante, noms d'équipes cohérents domicile/extérieur
+
+- [x] **M2 — Feature engineering**
+  - Modules dans `src/features/` : Elo pré-match, forme glissante (10 derniers matchs), buts marqués/encaissés glissants, head-to-head, classement moyen des 5 dernières saisons complètes
+  - Utilitaire blessures/valeur marchande (`market_value_injuries.py`) — réservé à l'inférence sur un match à venir, pas utilisable comme feature d'entraînement (pas d'historique de blessures disponible)
+  - Tests anti-fuite temporelle (`tests/test_features.py`) : 2 bugs de fuite détectés et corrigés (tri de date non stable, moyenne de buts de repli calculée sur le dataset entier au lieu de l'historique déjà connu)
+  - Dataset final : `data/processed/premier_league_features.parquet`, 1900 matchs × 6 features (`elo_diff`, `form_diff`, `h2h_home_win_rate`, `attack_diff`, `defense_diff`, `rank_diff`)
+
 - [ ] M3 — Baseline Logistic Regression
 - [ ] M4 — MLP (PyTorch)
 - [ ] M5 — LSTM/Transformer (PyTorch)
