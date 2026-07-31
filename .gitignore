@@ -21,3 +21,6 @@ models_saved/
 Thumbs.db
 .vscode/
 .idea/
+
+# Ancien projet (référence locale, hors repo)
+algo/
