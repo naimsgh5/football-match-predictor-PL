@@ -1,8 +1,8 @@
 # Football Match Predictor (Deep Learning)
 
-Prédiction du résultat d'un match de Premier League (victoire domicile / nul / victoire extérieur), en comparant plusieurs approches : baseline Logistic Regression → MLP → LSTM/Transformer (PyTorch).
+Prédiction du résultat d'un match de Premier League (victoire domicile / nul / victoire extérieur), en comparant plusieurs approches :  MLP → LSTM/Transformer (PyTorch).
 
-Projet personnel de montée en compétences en deep learning, dans la continuité d'un premier projet en Logistic Regression One-vs-All + Elo ratings + Monte Carlo (voir [`algo/`](algo/) pour l'ancienne version, gardée comme référence).
+Projet personnel de montée en compétences en deep learning.
 
 ## Structure
 
