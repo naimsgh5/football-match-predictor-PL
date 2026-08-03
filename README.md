@@ -45,7 +45,12 @@ pip install -r requirements.txt
   - Tests anti-fuite temporelle (`tests/test_features.py`) : 2 bugs de fuite détectés et corrigés (tri de date non stable, moyenne de buts de repli calculée sur le dataset entier au lieu de l'historique déjà connu)
   - Dataset final : `data/processed/premier_league_features.parquet`, 1900 matchs × 6 features (`elo_diff`, `form_diff`, `h2h_home_win_rate`, `attack_diff`, `defense_diff`, `rank_diff`)
 
-- [ ] M3 — Baseline Logistic Regression
+- [x] **M3 — Baseline Logistic Regression**
+  - `src/models/baseline_lr.py` : sklearn `LogisticRegression` multinomiale, features standardisées (`StandardScaler`)
+  - Split temporel strict : train = saisons 2021-2023 (1140 matchs), validation = saison 2024, test = saison 2025 (jamais de shuffle aléatoire)
+  - Résultats : accuracy 51.6% (val) / 48.2% (test), contre 40.8% / 42.6% pour la baseline naïve ("toujours domicile")
+  - Limite connue : le modèle prédit quasiment jamais le nul (classe la plus difficile à séparer) — à surveiller sur les modèles suivants
+  - `src/evaluation/metrics.py` : fonctions d'évaluation réutilisées pour M4/M5 (accuracy, log-loss, matrice de confusion)
 - [ ] M4 — MLP (PyTorch)
 - [ ] M5 — LSTM/Transformer (PyTorch)
 - [ ] M6 — Évaluation finale et comparaison des modèles
