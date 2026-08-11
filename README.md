@@ -51,7 +51,7 @@ pip install -r requirements.txt
   - Résultats : accuracy 51.6% (val) / 48.2% (test), contre 40.8% / 42.6% pour la baseline naïve ("toujours domicile")
   - Limite connue : le modèle prédit quasiment jamais le nul (classe la plus difficile à séparer) — à surveiller sur les modèles suivants
   - `src/evaluation/metrics.py` : fonctions d'évaluation réutilisées pour M4/M5 (accuracy, log-loss, matrice de confusion)
-  - `src/models/predict.py` : prédiction d'un match précis à venir (`python -m src.models.predict "Arsenal" "Chelsea"`), recalcule les features à partir de l'état final de l'historique ; ajustement blessures/valeur marchande optionnel en post-traitement (comme `algo/`)
+  - `src/models/predict.py` : prédiction d'un match précis à venir (`python -m src.models.predict "Arsenal" "Chelsea"`), recalcule les features à partir de l'état final de l'historique ; 3 ajustements optionnels post-hoc (jamais appris par le modèle) : blessures/valeur marchande (`src/features/squad_values.py`), jours de repos, cotes bookmaker (moyenne marché, marge retirée)
 - [ ] M4 — MLP (PyTorch)
 - [ ] M5 — LSTM/Transformer (PyTorch)
 - [ ] M6 — Évaluation finale et comparaison des modèles

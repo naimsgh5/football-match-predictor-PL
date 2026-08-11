@@ -55,6 +55,11 @@ def build_dataset_with_state(raw_path: str = RAW_PATH):
     df, h2h_history = add_h2h_features(df)
     df, standings = add_historical_rank_features(df)
 
+    last_match_date = {}
+    for team in set(df["home_team"]) | set(df["away_team"]):
+        team_dates = df.loc[(df["home_team"] == team) | (df["away_team"] == team), "date"]
+        last_match_date[team] = team_dates.max()
+
     state = {
         "elo": elo_final,
         "form_history": form_history,
@@ -62,6 +67,7 @@ def build_dataset_with_state(raw_path: str = RAW_PATH):
         "conceded": conceded,
         "h2h_history": h2h_history,
         "standings": standings,
+        "last_match_date": last_match_date,
     }
     return df, state
 
