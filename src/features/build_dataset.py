@@ -8,7 +8,7 @@ import pandas as pd
 from src.features.elo import add_elo_features
 from src.features.head_to_head import add_h2h_features
 from src.features.historical_rank import add_historical_rank_features
-from src.features.rolling_stats import add_form_features, add_goals_features
+from src.features.rolling_stats import add_form_features, add_goals_features, add_venue_form_features
 
 RAW_PATH = "data/raw/premier_league_results.csv"
 OUT_PATH = "data/processed/premier_league_features.parquet"
@@ -16,6 +16,7 @@ OUT_PATH = "data/processed/premier_league_features.parquet"
 FEATURE_COLUMNS = [
     "elo_diff",
     "form_diff",
+    "venue_form_diff",
     "h2h_home_win_rate",
     "attack_diff",
     "defense_diff",
@@ -51,6 +52,7 @@ def build_dataset_with_state(raw_path: str = RAW_PATH):
 
     df, elo_final = add_elo_features(df)
     df, form_history = add_form_features(df)
+    df, home_venue_history, away_venue_history = add_venue_form_features(df)
     df, scored, conceded = add_goals_features(df)
     df, h2h_history = add_h2h_features(df)
     df, standings = add_historical_rank_features(df)
@@ -63,6 +65,8 @@ def build_dataset_with_state(raw_path: str = RAW_PATH):
     state = {
         "elo": elo_final,
         "form_history": form_history,
+        "home_venue_history": home_venue_history,
+        "away_venue_history": away_venue_history,
         "scored": scored,
         "conceded": conceded,
         "h2h_history": h2h_history,

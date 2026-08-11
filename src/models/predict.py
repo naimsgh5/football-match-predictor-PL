@@ -1,16 +1,15 @@
 """Prédiction d'un match à venir (jamais vu à l'entraînement) avec le modèle déjà entraîné.
 
-Recalcule les features (Elo, forme, h2h, buts, classement) à partir de l'état final de
-l'historique complet, puis applique 3 ajustements optionnels *post-hoc* (le modèle n'a
-jamais appris sur ces signaux, ils ne font que déplacer la probabilité finale, comme dans
-algo/CLUBS_LOGISTIC_REGRESSION.ipynb) : blessures/valeur marchande, jours de repos, cotes
-bookmaker.
+Recalcule les features "coeur" (Elo, forme, forme domicile/extérieur, h2h, buts, classement
+5 ans) à partir de l'état final de l'historique complet, puis applique des ajustements
+optionnels *post-hoc* (le modèle n'a jamais appris dessus, ils ne font que déplacer la
+probabilité finale, comme dans algo/CLUBS_LOGISTIC_REGRESSION.ipynb) : blessures/valeur
+marchande, jours de repos, classement/points actuels, cotes bookmaker.
 
 Usage :
     python -m src.models.predict "Arsenal" "Chelsea"
 """
 import sys
-from datetime import datetime
 
 import joblib
 import numpy as np
@@ -26,9 +25,11 @@ from src.features.squad_values import SQUAD_VALUES
 MODEL_PATH = "models_saved/baseline_lr.joblib"
 SCALER_PATH = "models_saved/baseline_lr_scaler.joblib"
 DEFAULT_GOALS_AVG = 1.3
-REST_DAY_IMPACT = 0.12   # impact maximal (asymptotique) des jours de repos sur les probas
-INJURY_IMPACT = 0.15     # impact maximal du facteur blessures sur les probas
-ODDS_BLEND_WEIGHT = 0.5  # 0 = modele pur, 1 = cotes pures
+REST_DAY_IMPACT = 0.12       # impact maximal (asymptotique) des jours de repos sur les probas
+INJURY_IMPACT = 0.15         # impact maximal du facteur blessures sur les probas
+STANDINGS_IMPACT = 0.15      # impact maximal de l'ecart de points actuel sur les probas
+STANDINGS_POINTS_SCALE = 15  # ecart de points (~15 pts) au dela duquel l'impact sature
+ODDS_BLEND_WEIGHT = 0.5      # 0 = modele pur, 1 = cotes pures
 
 
 # ---------------------------------------------------------------------------
@@ -37,6 +38,11 @@ ODDS_BLEND_WEIGHT = 0.5  # 0 = modele pur, 1 = cotes pures
 
 def _team_form(team, form_history, n=FORM_WINDOW):
     hist = form_history.get(team, [])
+    return np.mean(hist[-n:]) if hist else 0.5
+
+
+def _venue_form(team, venue_history, n=FORM_WINDOW):
+    hist = venue_history.get(team, [])
     return np.mean(hist[-n:]) if hist else 0.5
 
 
@@ -65,6 +71,9 @@ def compute_features(home: str, away: str, state: dict):
     elo_away = state["elo"].get(away, 1500)
 
     form_diff = _team_form(home, state["form_history"]) - _team_form(away, state["form_history"])
+    venue_form_diff = (
+        _venue_form(home, state["home_venue_history"]) - _venue_form(away, state["away_venue_history"])
+    )
     h2h_rate = _h2h_rate(home, away, state["h2h_history"])
 
     gs_home = _team_goals_avg(home, state["scored"])
@@ -77,6 +86,7 @@ def compute_features(home: str, away: str, state: dict):
     features = {
         "elo_diff": elo_home - elo_away,
         "form_diff": form_diff,
+        "venue_form_diff": venue_form_diff,
         "h2h_home_win_rate": h2h_rate,
         "attack_diff": gs_home - gs_away,
         "defense_diff": gc_away - gc_home,
@@ -87,21 +97,12 @@ def compute_features(home: str, away: str, state: dict):
 
 
 # ---------------------------------------------------------------------------
-# Ajustements post-hoc
+# Ajustements post-hoc (saisis à la main, le modèle ne les connaît pas)
 # ---------------------------------------------------------------------------
 
-def _rest_days_diff(home, away, state, match_date):
-    """rest_home - rest_away, en jours. None si une des deux equipes n'a pas d'historique."""
-    last_home = state["last_match_date"].get(home)
-    last_away = state["last_match_date"].get(away)
-    if last_home is None or last_away is None:
-        return None
-    rest_home = (match_date - last_home).days
-    rest_away = (match_date - last_away).days
-    return rest_home - rest_away
-
-
 def _apply_rest_days(p_home, p_draw, p_away, rest_days_diff):
+    """rest_days_diff : jours de repos domicile - jours de repos exterieur.
+    +2 = domicile a 2 jours de repos de plus, -2 = c'est l'exterieur qui est plus repose."""
     factor = float(np.tanh(rest_days_diff / 7.0) * REST_DAY_IMPACT)
     p_home = max(0.01, p_home + factor * 0.5 * (1 - p_home))
     p_away = max(0.01, p_away - factor * 0.5 * p_away)
@@ -120,6 +121,18 @@ def _apply_injuries(home, away, p_home, p_draw, p_away, injured_home, injured_aw
     return p_home / total, p_draw / total, p_away / total, info
 
 
+def _apply_current_standings(p_home, p_draw, p_away, home_points, away_points):
+    """home_points/away_points : points au classement actuel (saison en cours). L'ecart de
+    points pousse la proba vers l'equipe la mieux classee - sature au dela de ~15 points
+    d'ecart (STANDINGS_POINTS_SCALE)."""
+    points_diff = home_points - away_points
+    factor = float(np.tanh(points_diff / STANDINGS_POINTS_SCALE) * STANDINGS_IMPACT)
+    p_home = max(0.01, p_home + factor * 0.5 * (1 - p_home))
+    p_away = max(0.01, p_away - factor * 0.5 * p_away)
+    total = p_home + p_draw + p_away
+    return p_home / total, p_draw / total, p_away / total, factor
+
+
 def _remove_margin(odds_1x2: dict) -> dict:
     raw = {k: 1 / v for k, v in odds_1x2.items()}
     s = sum(raw.values())
@@ -135,19 +148,60 @@ def _apply_odds(p_home, p_draw, p_away, odds_1x2, blend=ODDS_BLEND_WEIGHT):
     return p_home / total, p_draw / total, p_away / total, implied
 
 
+# Enjeu du match : niveau categoriel -> bonus de motivation pour l'equipe concernee.
+# "derby" est separe (pas un niveau par equipe) : un derby ne favorise pas un camp, il rend
+# statistiquement le match plus ferme (plus de nuls / scores serres), donc gonfle p_draw.
+STAKES_LEVELS = {
+    "neutre": 0.00,
+    "europe": 0.04,    # qualification Champions/Europa League en jeu
+    "maintien": 0.05,  # lutte pour le maintien : tres motivant (peur de la relegation)
+    "titre": 0.06,     # course au titre
+}
+DERBY_DRAW_BOOST = 0.05
+
+
+def _apply_stakes(p_home, p_draw, p_away, stakes_home, stakes_away, derby):
+    boost_home = STAKES_LEVELS.get(stakes_home, 0.0) if stakes_home else 0.0
+    boost_away = STAKES_LEVELS.get(stakes_away, 0.0) if stakes_away else 0.0
+    delta = boost_home - boost_away
+    p_home = max(0.01, p_home + delta)
+    p_away = max(0.01, p_away - delta)
+
+    if derby:
+        take_home = p_home * DERBY_DRAW_BOOST
+        take_away = p_away * DERBY_DRAW_BOOST
+        p_home -= take_home
+        p_away -= take_away
+        p_draw += take_home + take_away
+
+    total = p_home + p_draw + p_away
+    return p_home / total, p_draw / total, p_away / total
+
+
 # ---------------------------------------------------------------------------
 # Prédiction
 # ---------------------------------------------------------------------------
 
 def predict_match(home: str, away: str, model=None, scaler=None, state=None,
                    injured_home=None, injured_away=None, squad_values=None,
-                   match_date=None, odds_1x2=None, odds_blend=ODDS_BLEND_WEIGHT):
+                   rest_days_diff: int = None,
+                   home_position: int = None, home_points: int = None,
+                   away_position: int = None, away_points: int = None,
+                   odds_1x2=None, odds_blend=ODDS_BLEND_WEIGHT,
+                   stakes_home: str = None, stakes_away: str = None, derby: bool = False):
     """Retourne {"home": p, "draw": p, "away": p} et affiche un résumé.
 
-    injured_home/injured_away : listes de noms de joueurs absents.
-    squad_values : dict {equipe: {joueur: valeur_M€}} — SQUAD_VALUES (src/features/squad_values.py) par defaut.
-    match_date : date du match (defaut : aujourd'hui) — sert a calculer les jours de repos.
-    odds_1x2 : dict optionnel {"1": cote_domicile, "X": cote_nul, "2": cote_exterieur}.
+    Calculés automatiquement (aucune saisie) : elo, forme, forme domicile/exterieur, h2h,
+    buts, classement moyen 5 ans.
+
+    À saisir toi-même (le modèle ne les connaît pas) :
+      - injured_home / injured_away : listes de noms de joueurs absents
+      - rest_days_diff : jours de repos domicile - exterieur (+2 = domicile plus repose)
+      - home_position/home_points, away_position/away_points : classement ACTUEL saison en
+        cours (absent du dataset historique tant que la saison n'est pas terminee)
+      - odds_1x2 : dict optionnel {"1": cote_domicile, "X": cote_nul, "2": cote_exterieur}
+      - stakes_home/stakes_away : "titre" / "europe" / "maintien" / "neutre" (defaut)
+      - derby : True/False -- gonfle la proba de nul (match ferme), ne favorise aucun camp
     """
     if state is None:
         _df, state = build_dataset_with_state()
@@ -157,8 +211,6 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
         scaler = joblib.load(SCALER_PATH)
     if squad_values is None:
         squad_values = SQUAD_VALUES
-    if match_date is None:
-        match_date = datetime.now()
 
     for team in (home, away):
         if team not in state["elo"]:
@@ -181,10 +233,20 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
         )
         print(f"  + Blessures : {home} manque {list(inj_info['home'])}, {away} manque {list(inj_info['away'])}")
 
-    rest_diff = _rest_days_diff(home, away, state, match_date)
-    if rest_diff is not None and rest_diff != 0:
-        p_home, p_draw, p_away, rest_factor = _apply_rest_days(p_home, p_draw, p_away, rest_diff)
-        print(f"  + Repos : {home} {'+' if rest_diff >= 0 else ''}{rest_diff}j vs {away} (impact {rest_factor*100:+.1f}%)")
+    if rest_days_diff:
+        p_home, p_draw, p_away, rest_factor = _apply_rest_days(p_home, p_draw, p_away, rest_days_diff)
+        print(f"  + Repos : {home} {'+' if rest_days_diff >= 0 else ''}{rest_days_diff}j vs {away} "
+              f"(impact {rest_factor*100:+.1f}%)")
+
+    if home_points is not None and away_points is not None:
+        p_home, p_draw, p_away, standings_factor = _apply_current_standings(p_home, p_draw, p_away, home_points, away_points)
+        pos_str = (f" ({home_position}e vs {away_position}e)" if home_position and away_position else "")
+        print(f"  + Classement actuel : {home_points}pts vs {away_points}pts{pos_str} (impact {standings_factor*100:+.1f}%)")
+
+    if stakes_home or stakes_away or derby:
+        p_home, p_draw, p_away = _apply_stakes(p_home, p_draw, p_away, stakes_home, stakes_away, derby)
+        derby_str = " + derby" if derby else ""
+        print(f"  + Enjeu : {home}={stakes_home or 'neutre'} / {away}={stakes_away or 'neutre'}{derby_str}")
 
     if odds_1x2:
         p_home, p_draw, p_away, implied = _apply_odds(p_home, p_draw, p_away, odds_1x2, odds_blend)
@@ -207,5 +269,7 @@ if __name__ == "__main__":
         predict_match(
             "Man City", "Sunderland",
             injured_home=["Rodri"],
+            rest_days_diff=2,
+            home_position=1, home_points=68, away_position=17, away_points=31,
             odds_1x2={"1": 1.25, "X": 6.5, "2": 11.0},
         )

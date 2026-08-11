@@ -43,7 +43,8 @@ pip install -r requirements.txt
   - Modules dans `src/features/` : Elo pré-match, forme glissante (10 derniers matchs), buts marqués/encaissés glissants, head-to-head, classement moyen des 5 dernières saisons complètes
   - Utilitaire blessures/valeur marchande (`market_value_injuries.py`) — réservé à l'inférence sur un match à venir, pas utilisable comme feature d'entraînement (pas d'historique de blessures disponible)
   - Tests anti-fuite temporelle (`tests/test_features.py`) : 2 bugs de fuite détectés et corrigés (tri de date non stable, moyenne de buts de repli calculée sur le dataset entier au lieu de l'historique déjà connu)
-  - Dataset final : `data/processed/premier_league_features.parquet`, 1900 matchs × 6 features (`elo_diff`, `form_diff`, `h2h_home_win_rate`, `attack_diff`, `defense_diff`, `rank_diff`)
+  - Dataset final : `data/processed/premier_league_features.parquet`, 1900 matchs × 7 features (`elo_diff`, `form_diff`, `venue_form_diff`, `h2h_home_win_rate`, `attack_diff`, `defense_diff`, `rank_diff`)
+  - `venue_form_diff` : forme calculée séparément à domicile / à l'extérieur (ajoutée après coup, cf M3)
 
 - [x] **M3 — Baseline Logistic Regression**
   - `src/models/baseline_lr.py` : sklearn `LogisticRegression` multinomiale, features standardisées (`StandardScaler`)
@@ -51,7 +52,8 @@ pip install -r requirements.txt
   - Résultats : accuracy 51.6% (val) / 48.2% (test), contre 40.8% / 42.6% pour la baseline naïve ("toujours domicile")
   - Limite connue : le modèle prédit quasiment jamais le nul (classe la plus difficile à séparer) — à surveiller sur les modèles suivants
   - `src/evaluation/metrics.py` : fonctions d'évaluation réutilisées pour M4/M5 (accuracy, log-loss, matrice de confusion)
-  - `src/models/predict.py` : prédiction d'un match précis à venir (`python -m src.models.predict "Arsenal" "Chelsea"`), recalcule les features à partir de l'état final de l'historique ; 3 ajustements optionnels post-hoc (jamais appris par le modèle) : blessures/valeur marchande (`src/features/squad_values.py`), jours de repos, cotes bookmaker (moyenne marché, marge retirée)
+  - `src/models/predict.py` : prédiction d'un match précis à venir (`python -m src.models.predict "Arsenal" "Chelsea"`), recalcule les features automatiques à partir de l'état final de l'historique ; ajustements optionnels post-hoc, saisis à la main (jamais appris par le modèle) : blessures/valeur marchande (`src/features/squad_values.py`), jours de repos, classement/points actuels (saison en cours, absente du dataset), enjeu du match (titre/europe/maintien/derby), cotes bookmaker (moyenne marché, marge retirée)
+  - Réentraîné après l'ajout de `venue_form_diff` : accuracy 52.1%/47.9% (quasi identique, `venue_form_diff` a peu d'importance pour un modèle linéaire — à surveiller sur MLP/LSTM)
 - [ ] M4 — MLP (PyTorch)
 - [ ] M5 — LSTM/Transformer (PyTorch)
 - [ ] M6 — Évaluation finale et comparaison des modèles

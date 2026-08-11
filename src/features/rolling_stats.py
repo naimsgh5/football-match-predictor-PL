@@ -37,6 +37,37 @@ def add_form_features(df: pd.DataFrame, n: int = WINDOW):
     return out, history
 
 
+def add_venue_form_features(df: pd.DataFrame, n: int = WINDOW):
+    """Forme spécifique domicile/extérieur : contrairement à form_diff (mélange les matchs
+    domicile+extérieur de chaque équipe), ici l'équipe qui reçoit est évaluée uniquement sur
+    ses n derniers matchs À DOMICILE, et l'équipe qui se déplace uniquement sur ses n derniers
+    matchs À L'EXTÉRIEUR — certaines équipes sont beaucoup plus fortes chez elles qu'au loin."""
+    home_history: dict[str, list[float]] = {}
+    away_history: dict[str, list[float]] = {}
+    form_home_specific, form_away_specific = [], []
+
+    for home, away, hs, aw in zip(df["home_team"], df["away_team"], df["home_score"], df["away_score"]):
+        h_hist = home_history.get(home, [])
+        a_hist = away_history.get(away, [])
+        form_home_specific.append(np.mean(h_hist[-n:]) if h_hist else 0.5)
+        form_away_specific.append(np.mean(a_hist[-n:]) if a_hist else 0.5)
+
+        if hs > aw:
+            home_result, away_result = 1.0, 0.0
+        elif hs == aw:
+            home_result, away_result = 0.5, 0.5
+        else:
+            home_result, away_result = 0.0, 1.0
+        home_history.setdefault(home, []).append(home_result)
+        away_history.setdefault(away, []).append(away_result)
+
+    out = df.copy()
+    out["form_home_specific"] = form_home_specific
+    out["form_away_specific"] = form_away_specific
+    out["venue_form_diff"] = out["form_home_specific"] - out["form_away_specific"]
+    return out, home_history, away_history
+
+
 def add_goals_features(df: pd.DataFrame, n: int = WINDOW, default_avg: float = 1.3):
     """Ajoute les moyennes glissantes de buts marqués/encaissés et les diffs attaque/défense.
 
