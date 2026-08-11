@@ -28,6 +28,14 @@ def _get_season(d: pd.Timestamp) -> int:
 
 
 def build_dataset(raw_path: str = RAW_PATH) -> pd.DataFrame:
+    df, _state = build_dataset_with_state(raw_path)
+    return df
+
+
+def build_dataset_with_state(raw_path: str = RAW_PATH):
+    """Comme build_dataset, mais retourne aussi (df, state) où state contient l'historique
+    final de chaque module (elo, forme, buts, h2h, classement) — nécessaire pour calculer
+    les features d'un match futur (hors dataset) au moment de l'inférence."""
     df = pd.read_csv(raw_path, parse_dates=["date"])
     # tri stable : plusieurs matchs partagent la meme date (derniere journee de saison),
     # un tri instable romprait ces egalites differemment selon le sous-ensemble de lignes
@@ -41,13 +49,21 @@ def build_dataset(raw_path: str = RAW_PATH) -> pd.DataFrame:
         np.where(df["home_score"] == df["away_score"], 1, 0),
     )
 
-    df, _elo_final = add_elo_features(df)
-    df, _form_history = add_form_features(df)
-    df, _scored, _conceded = add_goals_features(df)
-    df, _h2h_history = add_h2h_features(df)
-    df = add_historical_rank_features(df)
+    df, elo_final = add_elo_features(df)
+    df, form_history = add_form_features(df)
+    df, scored, conceded = add_goals_features(df)
+    df, h2h_history = add_h2h_features(df)
+    df, standings = add_historical_rank_features(df)
 
-    return df
+    state = {
+        "elo": elo_final,
+        "form_history": form_history,
+        "scored": scored,
+        "conceded": conceded,
+        "h2h_history": h2h_history,
+        "standings": standings,
+    }
+    return df, state
 
 
 if __name__ == "__main__":

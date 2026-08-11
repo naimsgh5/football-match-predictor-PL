@@ -38,25 +38,30 @@ def _season_final_standings(df: pd.DataFrame) -> dict[int, dict[str, int]]:
     return standings
 
 
+def average_rank(team: str, standings: dict[int, dict[str, int]], seasons: list[int], fallback: int = FALLBACK_RANK) -> float:
+    """Rang moyen d'une équipe sur une liste de saisons données (celles où elle est absente
+    des standings, ex: équipe pas encore en PL, sont ignorées ; fallback si aucune trouvée)."""
+    ranks = [standings[s][team] for s in seasons if team in standings[s]]
+    return float(np.mean(ranks)) if ranks else float(fallback)
+
+
 def add_historical_rank_features(df: pd.DataFrame, n_seasons: int = N_SEASONS, fallback: int = FALLBACK_RANK):
     """Ajoute rank_home, rank_away, rank_diff : rang final moyen de l'équipe sur les
-    n_seasons saisons complètes précédant strictement la saison du match courant."""
+    n_seasons saisons complètes précédant strictement la saison du match courant.
+
+    Retourne (df_avec_features, standings) — standings permet de calculer le classement
+    d'un futur match (au-delà des saisons du dataset) sans tout recalculer."""
     standings = _season_final_standings(df)
     seasons_sorted = sorted(standings.keys())
 
     rank_home, rank_away = [], []
     for season, home, away in zip(df["season"], df["home_team"], df["away_team"]):
         past_seasons = [s for s in seasons_sorted if s < season][-n_seasons:]
-
-        def avg_rank(team):
-            ranks = [standings[s][team] for s in past_seasons if team in standings[s]]
-            return np.mean(ranks) if ranks else fallback
-
-        rank_home.append(avg_rank(home))
-        rank_away.append(avg_rank(away))
+        rank_home.append(average_rank(home, standings, past_seasons, fallback))
+        rank_away.append(average_rank(away, standings, past_seasons, fallback))
 
     out = df.copy()
     out["rank_home"] = rank_home
     out["rank_away"] = rank_away
     out["rank_diff"] = out["rank_away"] - out["rank_home"]
-    return out
+    return out, standings
