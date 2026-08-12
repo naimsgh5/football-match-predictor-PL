@@ -278,6 +278,15 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
         print(f"  + Cotes marche (implicite) : {implied['1']*100:.1f}% / {implied['X']*100:.1f}% / {implied['2']*100:.1f}% "
               f"(blend={odds_blend})")
 
+    no_manual_input = not any([
+        injured_home, injured_away, rest_days_diff,
+        home_points is not None and away_points is not None,
+        stakes_home, stakes_away, derby, odds_1x2,
+    ])
+    if no_manual_input:
+        print("  (!) Aucun ajustement manuel fourni (blessures, repos, classement, enjeu, cotes)")
+        print("      -> prediction basee uniquement sur l'historique, pas sur le contexte du jour J")
+
     print()
     print(f"  {RESULT_LABELS[2]} {home:<20} {p_home * 100:5.1f}%")
     print(f"  {RESULT_LABELS[1]:<28} {p_draw * 100:5.1f}%")
