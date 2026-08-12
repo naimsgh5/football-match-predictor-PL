@@ -122,6 +122,23 @@ of injuries, never by training).
 
 ---
 
+## Update the web UI (browser artifact)
+
+After updating data/retraining models here (or in any other league):
+
+```powershell
+E:\conda_envs\football-dl\python.exe -m src.export_web
+```
+
+Then, from `../WebUI/`:
+```powershell
+E:\conda_envs\football-dl\python.exe build.py
+```
+This rebuilds `WebUI/predictor_final.html` — ask Claude to republish it as the artifact
+(same link). See `../WebUI/README.md` for details.
+
+---
+
 ## Quick reference
 
 | I want to... | Command |

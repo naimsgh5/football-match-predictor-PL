@@ -79,6 +79,7 @@ pip install -r requirements.txt
   - `predict.py`: `lineup_home`/`lineup_away` (confirmed starting XI, 11 names) — compares the fielded XI's value to the team's strongest possible XI, **complementing** `injured_home`/`injured_away` rather than replacing it (an injured/absent player and a fit-but-benched player are different signals, both tracked); realistically only usable ~1h before kickoff when lineups are confirmed
   - `predict.py` output now shows **both models' predictions separately** (clearly labelled "Model 1/2" / "Model 2/2"), instead of a single model — same post-hoc adjustments applied independently to each, so their reactions to the same inputs can be compared directly
   - Removed `markets.py::betting_notes()` (the "informational, not financial advice" text summary) — the Poisson goal markets (scores/BTTS/over-under) themselves are unchanged
+  - `src/export_web.py`: exports model weights + historical state + squad values to `data/processed/web_export.json`, for a browser-based UI (Claude Artifact) that reimplements this file's logic in JavaScript — no Python backend, runs fully client-side. The JS port was validated against a Python-only "shadow" implementation (reading solely the exported JSON) before being transcribed, cross-checked against real `predict.py` runs until they matched exactly. Build tooling lives in `../WebUI/` (local only — it bundles all 5 leagues, 4 of which aren't public)
 
 - [ ] M5 — LSTM/Transformer (PyTorch)
 - [ ] M6 — Final evaluation and model comparison

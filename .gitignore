@@ -30,3 +30,8 @@ LaLiga/
 SerieA/
 Ligue1/
 Bundesliga/
+
+# Interface web (artifact) : combine les donnees des 5 championnats, dont 4 sont
+# prives -- reste local dans son ensemble pour eviter toute fuite via le fichier
+# assemble predictor_final.html
+WebUI/
