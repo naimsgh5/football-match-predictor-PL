@@ -89,6 +89,8 @@ predict_match(
     "Man City", "Sunderland",
     injured_home=["Rodri"],              # home players out
     injured_away=[],                     # away players out
+    lineup_home=[...],                   # confirmed starting XI, 11 names (complements injured_home)
+    lineup_away=[...],
     rest_days_diff=2,                    # rest-day gap (+ = home team more rested)
     home_position=1, home_points=68,     # CURRENT home standings
     away_position=17, away_points=31,    # CURRENT away standings

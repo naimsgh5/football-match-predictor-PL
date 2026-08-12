@@ -51,7 +51,7 @@ pip install -r requirements.txt
   - Modules in `src/features/`: pre-match Elo, rolling form (last 10 matches), rolling goals scored/conceded, head-to-head, average rank over the last 5 completed seasons
   - Injuries/market value utility (`market_value_injuries.py`) — reserved for inference on an upcoming match, not usable as a training feature (no injury history available)
   - Anti-lookahead-leakage tests (`tests/test_features.py`): 2 leakage bugs found and fixed (unstable date sort, fallback goals average computed on the whole dataset instead of the history known so far)
-  - Final dataset: `data/processed/premier_league_features.parquet`, 1900 matches × 8 features (`elo_diff`, `form_diff`, `venue_form_diff`, `h2h_home_win_rate`, `attack_diff`, `defense_diff`, `rank_diff`, `congestion_diff`)
+  - Final dataset: `data/processed/premier_league_features.parquet`, 1900 matches × 10 features (`elo_diff`, `form_diff`, `venue_form_diff`, `h2h_home_win_rate`, `attack_diff`, `defense_diff`, `rank_diff`, `congestion_diff`, `quality_form_diff`, `clean_sheet_diff`)
   - `venue_form_diff`: form computed separately for home / away (added later, see M3)
   - `congestion_diff` (added later, see M4): proxy for fixture congestion / squad-rotation risk — number of matches each team played in the preceding 10 days. Known limitation: only counts PL matches from this dataset, not cup/European matches (source not available) — underestimates the true fatigue of a team competing on multiple fronts. Non-zero on 13.8% of matches (festive period, midweek rounds)
 
@@ -73,6 +73,12 @@ pip install -r requirements.txt
   - Results: accuracy 53.4% (val) / 49.5% (test), log-loss 0.982 / 1.033 — slight improvement across the board over the LR baseline (52.1% / 47.9%, log-loss 0.996 / 1.040)
   - Same limitation as M3: draws are still ignored (0% recall) on both models — weak signal in the current features rather than a model-capacity limit
   - Retrained after adding `congestion_diff`: LR 51.6%/47.6%, MLP 51.6%/47.6% (slight dip, likely noise given the dataset size) — modest LR coefficient (0.042, 6th of 8) but not negligible, feature kept for M5 and computed automatically in `predict.py` (`match_date`, defaults to today)
+  - `quality_form_diff` (10 features total): form weighted by opponent strength — rolling average of (result − expected result, from the Elo formula), so beating a strong team counts for more than beating a weak one, and losing to a weak team hurts more than losing to a strong one. Complements `form_diff` (which treats every result identically regardless of opponent) and `elo_diff` (which only partially captures this at the rating level, not the recent-form level)
+  - `clean_sheet_diff`: rolling clean sheet rate (last 10 matches), distinct from `defense_diff` (average goals conceded can hide very different defensive consistency — e.g. `[0,0,0,0,3]` and `[1,1,1,1,1]` average the same 0.6 but have wildly different clean sheet counts)
+  - Retrained after both: LR 51.8%/47.4%, MLP 51.3%/47.6% (roughly flat, within noise) — `quality_form_diff` lands 3rd by LR coefficient (0.185, above `attack_diff`), `clean_sheet_diff` 5th (0.100) — both meaningfully used by the model, not negligible
+  - `predict.py`: `lineup_home`/`lineup_away` (confirmed starting XI, 11 names) — compares the fielded XI's value to the team's strongest possible XI, **complementing** `injured_home`/`injured_away` rather than replacing it (an injured/absent player and a fit-but-benched player are different signals, both tracked); realistically only usable ~1h before kickoff when lineups are confirmed
+  - `predict.py` output now shows **both models' predictions separately** (clearly labelled "Model 1/2" / "Model 2/2"), instead of a single model — same post-hoc adjustments applied independently to each, so their reactions to the same inputs can be compared directly
+  - Removed `markets.py::betting_notes()` (the "informational, not financial advice" text summary) — the Poisson goal markets (scores/BTTS/over-under) themselves are unchanged
 
 - [ ] M5 — LSTM/Transformer (PyTorch)
 - [ ] M6 — Final evaluation and model comparison

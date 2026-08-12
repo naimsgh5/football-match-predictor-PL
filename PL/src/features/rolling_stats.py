@@ -8,6 +8,7 @@ import pandas as pd
 
 WINDOW = 10
 CONGESTION_WINDOW_DAYS = 10
+CLEAN_SHEET_DEFAULT_RATE = 0.25  # ~league-wide clean sheet rate, seeds a team with no history yet
 
 
 def add_form_features(df: pd.DataFrame, n: int = WINDOW):
@@ -36,6 +37,86 @@ def add_form_features(df: pd.DataFrame, n: int = WINDOW):
     out["form_away"] = form_away
     out["form_diff"] = out["form_home"] - out["form_away"]
     return out, history
+
+
+def _expected_result(own_elo: float, opponent_elo: float) -> float:
+    """Same logistic formula as elo.py: probability of winning given the Elo gap."""
+    return 1 / (1 + 10 ** ((opponent_elo - own_elo) / 400))
+
+
+def add_quality_form_features(df: pd.DataFrame, n: int = WINDOW):
+    """Form weighted by opponent strength: rolling average of (result - expected result),
+    where the expected result comes from the same Elo formula as elo.py (df must already
+    have elo_home/elo_away -- call this after add_elo_features).
+
+    Unlike form_diff (which treats every win/draw/loss the same regardless of opponent),
+    this rewards overperforming a tough opponent and penalizes underperforming a weak one:
+    a draw against a much stronger team scores strongly positive, a loss to a much weaker
+    team scores strongly negative, whereas form_diff would count them identically to a
+    draw/loss against any other opponent. Answers "beating the 16th isn't the same as
+    beating the 2nd" directly, on top of what elo_diff already partially captures.
+
+    Not bounded to [0, 1] like form_diff (a rolling average of a signed, unbounded-ish
+    quantity) -- fine since it goes through StandardScaler before training anyway."""
+    history: dict[str, list[float]] = {}
+    qform_home, qform_away = [], []
+
+    for home, away, hs, aw, elo_home, elo_away in zip(
+        df["home_team"], df["away_team"], df["home_score"], df["away_score"], df["elo_home"], df["elo_away"]
+    ):
+        h_hist = history.get(home, [])
+        a_hist = history.get(away, [])
+        qform_home.append(np.mean(h_hist[-n:]) if h_hist else 0.0)
+        qform_away.append(np.mean(a_hist[-n:]) if a_hist else 0.0)
+
+        if hs > aw:
+            home_result, away_result = 1.0, 0.0
+        elif hs == aw:
+            home_result, away_result = 0.5, 0.5
+        else:
+            home_result, away_result = 0.0, 1.0
+
+        exp_home = _expected_result(elo_home, elo_away)
+        exp_away = 1 - exp_home
+        history.setdefault(home, []).append(home_result - exp_home)
+        history.setdefault(away, []).append(away_result - exp_away)
+
+    out = df.copy()
+    out["quality_form_home"] = qform_home
+    out["quality_form_away"] = qform_away
+    out["quality_form_diff"] = out["quality_form_home"] - out["quality_form_away"]
+    return out, history
+
+
+def add_clean_sheet_features(df: pd.DataFrame, n: int = WINDOW, default_rate: float = CLEAN_SHEET_DEFAULT_RATE):
+    """Rolling clean sheet rate (fraction of the last n matches with 0 goals conceded).
+
+    Distinct from defense_diff (average goals conceded): two teams can have the same
+    average while having very different defensive consistency, e.g. conceding
+    [0,0,0,0,3] vs [1,1,1,1,1] both average 0.6 goals/match but the first has 4 clean
+    sheets out of 5 and the second has none -- defense_diff alone can't tell them apart.
+
+    default_rate seeds a team with no history yet (~typical league-wide clean sheet rate,
+    refine per league if the actual rate differs noticeably)."""
+    clean_sheets: dict[str, list[float]] = {}
+    cs_home, cs_away = [], []
+
+    for home, away, hs, aw in zip(df["home_team"], df["away_team"], df["home_score"], df["away_score"]):
+        h_hist = clean_sheets.get(home, [])
+        a_hist = clean_sheets.get(away, [])
+        cs_home.append(np.mean(h_hist[-n:]) if h_hist else default_rate)
+        cs_away.append(np.mean(a_hist[-n:]) if a_hist else default_rate)
+
+        home_clean = 1.0 if aw == 0 else 0.0
+        away_clean = 1.0 if hs == 0 else 0.0
+        clean_sheets.setdefault(home, []).append(home_clean)
+        clean_sheets.setdefault(away, []).append(away_clean)
+
+    out = df.copy()
+    out["clean_sheet_rate_home"] = cs_home
+    out["clean_sheet_rate_away"] = cs_away
+    out["clean_sheet_diff"] = out["clean_sheet_rate_home"] - out["clean_sheet_rate_away"]
+    return out, clean_sheets
 
 
 def add_venue_form_features(df: pd.DataFrame, n: int = WINDOW):

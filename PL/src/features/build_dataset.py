@@ -9,9 +9,11 @@ from src.features.elo import add_elo_features
 from src.features.head_to_head import add_h2h_features
 from src.features.historical_rank import add_historical_rank_features
 from src.features.rolling_stats import (
+    add_clean_sheet_features,
     add_congestion_features,
     add_form_features,
     add_goals_features,
+    add_quality_form_features,
     add_venue_form_features,
 )
 
@@ -27,6 +29,8 @@ FEATURE_COLUMNS = [
     "defense_diff",
     "rank_diff",
     "congestion_diff",
+    "quality_form_diff",
+    "clean_sheet_diff",
 ]
 
 
@@ -57,9 +61,11 @@ def build_dataset_with_state(raw_path: str = RAW_PATH):
     )
 
     df, elo_final = add_elo_features(df)
+    df, quality_form_history = add_quality_form_features(df)  # needs elo_home/elo_away -> after add_elo_features
     df, form_history = add_form_features(df)
     df, home_venue_history, away_venue_history = add_venue_form_features(df)
     df, scored, conceded = add_goals_features(df)
+    df, clean_sheet_history = add_clean_sheet_features(df)
     df, h2h_history = add_h2h_features(df)
     df, standings = add_historical_rank_features(df)
     df, match_dates = add_congestion_features(df)
@@ -69,10 +75,12 @@ def build_dataset_with_state(raw_path: str = RAW_PATH):
     state = {
         "elo": elo_final,
         "form_history": form_history,
+        "quality_form_history": quality_form_history,
         "home_venue_history": home_venue_history,
         "away_venue_history": away_venue_history,
         "scored": scored,
         "conceded": conceded,
+        "clean_sheet_history": clean_sheet_history,
         "h2h_history": h2h_history,
         "standings": standings,
         "match_dates": match_dates,

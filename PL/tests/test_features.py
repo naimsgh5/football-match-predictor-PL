@@ -60,3 +60,17 @@ def test_congestion_is_zero_without_recent_history(full_dataset):
     assert first_match["congestion_diff"] == 0, (
         "The dataset's very first match should have no recent history -> congestion_diff=0 expected"
     )
+
+
+def test_quality_form_is_zero_without_recent_history(full_dataset):
+    first_match = full_dataset.iloc[0]
+    assert first_match["quality_form_diff"] == 0, (
+        "Both teams fall back to the same neutral quality-form value -> diff=0 expected on the first match"
+    )
+
+
+def test_clean_sheet_diff_is_zero_without_recent_history(full_dataset):
+    first_match = full_dataset.iloc[0]
+    assert first_match["clean_sheet_diff"] == 0, (
+        "Both teams fall back to the same default clean sheet rate -> diff=0 expected on the first match"
+    )

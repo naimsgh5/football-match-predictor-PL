@@ -23,8 +23,8 @@ from src.evaluation.metrics import RESULT_LABELS
 from src.features.build_dataset import FEATURE_COLUMNS, build_dataset_with_state
 from src.features.head_to_head import WINDOW as H2H_WINDOW
 from src.features.historical_rank import N_SEASONS, average_rank
-from src.features.market_value_injuries import injury_strength
-from src.features.rolling_stats import CONGESTION_WINDOW_DAYS, WINDOW as FORM_WINDOW
+from src.features.market_value_injuries import injury_strength, lineup_strength
+from src.features.rolling_stats import CLEAN_SHEET_DEFAULT_RATE, CONGESTION_WINDOW_DAYS, WINDOW as FORM_WINDOW
 from src.features.squad_values import SQUAD_VALUES
 from src.models.markets import OU_LINES, btts, expected_goals, goal_matrix, implied_1x2, over_under, top_scorelines
 from src.models.mlp import MLP
@@ -37,6 +37,7 @@ LR_SCALER_PATH = "models_saved/baseline_lr_scaler.joblib"
 DEFAULT_GOALS_AVG = 1.3
 REST_DAY_IMPACT = 0.12       # maximum (asymptotic) impact of rest days on the probabilities
 INJURY_IMPACT = 0.15         # maximum impact of the injury factor on the probabilities
+LINEUP_IMPACT = 0.15         # maximum impact of the confirmed-lineup factor on the probabilities
 STANDINGS_IMPACT = 0.15      # maximum impact of the current points gap on the probabilities
 STANDINGS_POINTS_SCALE = 15  # points gap (~15 pts) beyond which the impact saturates
 ODDS_BLEND_WEIGHT = 0.5      # 0 = pure model, 1 = pure odds
@@ -49,6 +50,16 @@ ODDS_BLEND_WEIGHT = 0.5      # 0 = pure model, 1 = pure odds
 def _team_form(team, form_history, n=FORM_WINDOW):
     hist = form_history.get(team, [])
     return np.mean(hist[-n:]) if hist else 0.5
+
+
+def _quality_form(team, quality_form_history, n=FORM_WINDOW):
+    hist = quality_form_history.get(team, [])
+    return np.mean(hist[-n:]) if hist else 0.0
+
+
+def _clean_sheet_rate(team, clean_sheet_history, n=FORM_WINDOW, default_rate=CLEAN_SHEET_DEFAULT_RATE):
+    hist = clean_sheet_history.get(team, [])
+    return np.mean(hist[-n:]) if hist else default_rate
 
 
 def _venue_form(team, venue_history, n=FORM_WINDOW):
@@ -99,6 +110,9 @@ def compute_features(home: str, away: str, state: dict, match_date=None):
     elo_away = state["elo"].get(away, 1500)
 
     form_diff = _team_form(home, state["form_history"]) - _team_form(away, state["form_history"])
+    quality_form_diff = (
+        _quality_form(home, state["quality_form_history"]) - _quality_form(away, state["quality_form_history"])
+    )
     venue_form_diff = (
         _venue_form(home, state["home_venue_history"]) - _venue_form(away, state["away_venue_history"])
     )
@@ -108,6 +122,9 @@ def compute_features(home: str, away: str, state: dict, match_date=None):
     gc_home = _team_goals_avg(home, state["conceded"])
     gs_away = _team_goals_avg(away, state["scored"])
     gc_away = _team_goals_avg(away, state["conceded"])
+    clean_sheet_diff = (
+        _clean_sheet_rate(home, state["clean_sheet_history"]) - _clean_sheet_rate(away, state["clean_sheet_history"])
+    )
 
     rank_diff, rank_home, rank_away = _rank_diff(home, away, state["standings"])
 
@@ -124,6 +141,8 @@ def compute_features(home: str, away: str, state: dict, match_date=None):
         "defense_diff": gc_away - gc_home,
         "rank_diff": rank_diff,
         "congestion_diff": congestion_away - congestion_home,
+        "quality_form_diff": quality_form_diff,
+        "clean_sheet_diff": clean_sheet_diff,
     }
     context = {
         "elo_home": elo_home, "elo_away": elo_away,
@@ -156,6 +175,24 @@ def _apply_injuries(home, away, p_home, p_draw, p_away, injured_home, injured_aw
     p_away = max(0.01, p_away - delta)
     total = p_home + p_draw + p_away
     info = {"home": details_home, "away": details_away}
+    return p_home / total, p_draw / total, p_away / total, info
+
+
+def _apply_lineup(home, away, p_home, p_draw, p_away, lineup_home, lineup_away, squad_values):
+    """Complements _apply_injuries: a confirmed starting XI (lineup_home/lineup_away, 11
+    names each) is compared to each team's strongest possible XI by value. Independent
+    signal from injuries -- a fit player left on the bench isn't "missing", it's a
+    separate rotation/tactical signal, so both adjustments can apply at once."""
+    factor_home, actual_home, ref_home, unknown_home = lineup_strength(home, lineup_home or [], squad_values)
+    factor_away, actual_away, ref_away, unknown_away = lineup_strength(away, lineup_away or [], squad_values)
+    delta = ((factor_home - 1.0) - (factor_away - 1.0)) * LINEUP_IMPACT
+    p_home = max(0.01, p_home + delta)
+    p_away = max(0.01, p_away - delta)
+    total = p_home + p_draw + p_away
+    info = {
+        "home": (factor_home, actual_home, ref_home, unknown_home),
+        "away": (factor_away, actual_away, ref_away, unknown_away),
+    }
     return p_home / total, p_draw / total, p_away / total, info
 
 
@@ -217,6 +254,7 @@ def _apply_stakes(p_home, p_draw, p_away, stakes_home, stakes_away, derby):
 
 
 def _apply_all_adjustments(p_home, p_draw, p_away, *, home, away, injured_home, injured_away, squad_values,
+                            lineup_home, lineup_away,
                             rest_days_diff, home_points, away_points, home_position, away_position,
                             stakes_home, stakes_away, derby, odds_1x2, odds_blend):
     """Applies every requested post-hoc adjustment in sequence to a single model's raw
@@ -229,6 +267,16 @@ def _apply_all_adjustments(p_home, p_draw, p_away, *, home, away, injured_home, 
             home, away, p_home, p_draw, p_away, injured_home, injured_away, squad_values
         )
         lines.append(f"  + Injuries : {home} missing {list(inj_info['home'])}, {away} missing {list(inj_info['away'])}")
+
+    if lineup_home or lineup_away:
+        p_home, p_draw, p_away, lineup_info = _apply_lineup(
+            home, away, p_home, p_draw, p_away, lineup_home, lineup_away, squad_values
+        )
+        fh, ah, rh, uh = lineup_info["home"]
+        fa, aa, ra, ua = lineup_info["away"]
+        home_str = f"{fh*100:.0f}% of best XI" if ah is not None else "unknown"
+        away_str = f"{fa*100:.0f}% of best XI" if aa is not None else "unknown"
+        lines.append(f"  + Lineup : {home} fields {home_str}, {away} fields {away_str}")
 
     if rest_days_diff:
         p_home, p_draw, p_away, rest_factor = _apply_rest_days(p_home, p_draw, p_away, rest_days_diff)
@@ -305,7 +353,8 @@ def _print_goal_markets(home, away, context, n_scorelines=5):
 # ---------------------------------------------------------------------------
 
 def predict_match(home: str, away: str, lr_model=None, lr_scaler=None, mlp_model=None, mlp_scaler=None,
-                   state=None, injured_home=None, injured_away=None, squad_values=None,
+                   state=None, injured_home=None, injured_away=None,
+                   lineup_home: list = None, lineup_away: list = None, squad_values=None,
                    rest_days_diff: int = None,
                    home_position: int = None, home_points: int = None,
                    away_position: int = None, away_points: int = None,
@@ -315,14 +364,19 @@ def predict_match(home: str, away: str, lr_model=None, lr_scaler=None, mlp_model
     """Prints the prediction of each trained model separately, and returns
     {"logistic_regression": {"home": p, "draw": p, "away": p}, "mlp": {...}}.
 
-    Computed automatically (no input needed): elo, form, home/away form, h2h, goals,
-    5-season average rank, fixture congestion (congestion_diff, on match_date - defaults
-    to today; only counts PL matches from this dataset, not cup/European matches --
-    underestimates the true fatigue of a team competing on multiple fronts, complement
-    with rest_days_diff if you know the real situation better).
+    Computed automatically (no input needed): elo, form, opponent-strength-weighted form
+    (quality_form_diff), home/away form, h2h, goals, clean sheet rate, 5-season average
+    rank, fixture congestion (congestion_diff, on match_date - defaults to today; only
+    counts PL matches from this dataset, not cup/European matches -- underestimates the
+    true fatigue of a team competing on multiple fronts, complement with rest_days_diff
+    if you know the real situation better).
 
     To enter yourself (neither model knows about these):
       - injured_home / injured_away: lists of absent player names
+      - lineup_home / lineup_away: confirmed starting XI (11 names each), compared to each
+        team's strongest possible XI by value -- complements injured_home/away rather than
+        replacing it (a player being out and a player being benched are different signals);
+        realistically only known ~1h before kickoff
       - rest_days_diff: home rest days - away rest days (+2 = home more rested)
       - home_position/home_points, away_position/away_points: CURRENT standings for the
         ongoing season (absent from the historical dataset until the season is over)
@@ -369,16 +423,17 @@ def predict_match(home: str, away: str, lr_model=None, lr_scaler=None, mlp_model
           f"{home} {context['congestion_home']} vs {away} {context['congestion_away']}")
 
     no_manual_input = not any([
-        injured_home, injured_away, rest_days_diff,
+        injured_home, injured_away, lineup_home, lineup_away, rest_days_diff,
         home_points is not None and away_points is not None,
         stakes_home, stakes_away, derby, odds_1x2,
     ])
     if no_manual_input:
-        print("  (!) No manual adjustment provided (injuries, rest, standings, stakes, odds)")
+        print("  (!) No manual adjustment provided (injuries, lineup, rest, standings, stakes, odds)")
         print("      -> prediction based on history only, not on the matchday context")
 
     adjustment_kwargs = dict(
-        injured_home=injured_home, injured_away=injured_away, squad_values=squad_values,
+        injured_home=injured_home, injured_away=injured_away,
+        lineup_home=lineup_home, lineup_away=lineup_away, squad_values=squad_values,
         rest_days_diff=rest_days_diff, home_points=home_points, away_points=away_points,
         home_position=home_position, away_position=away_position,
         stakes_home=stakes_home, stakes_away=stakes_away, derby=derby,
