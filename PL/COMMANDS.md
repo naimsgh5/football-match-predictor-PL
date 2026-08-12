@@ -1,7 +1,7 @@
 # Commandes utiles
 
 Aide-mémoire des commandes courantes du projet Premier League. **Tout se lance depuis ce
-dossier** (`e:\PROJET DL\PL`, pas la racine du repo qui contient plusieurs championnats) :
+dossier** (`e:\PROJET DL\PL`) :
 
 ```powershell
 cd "e:\PROJET DL\PL"

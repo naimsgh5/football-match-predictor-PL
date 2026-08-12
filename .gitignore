@@ -11,9 +11,7 @@ venv/
 .venv/
 env/
 
-# Data & artefacts régénérables (voir README de chaque dossier de compétition pour les
-# reconstruire) -- pattern générique pour couvrir PL/, et les futurs dossiers de championnat
-# (LaLiga/, Bundesliga/, LDC/, ...) sans avoir à les rajouter un par un ici
+# Data & artefacts régénérables (voir PL/README.md pour les reconstruire)
 */data/interim/
 */data/processed/
 */models_saved/

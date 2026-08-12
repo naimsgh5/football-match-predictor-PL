@@ -2,7 +2,7 @@
 
 Prédiction du résultat d'un match de Premier League (victoire domicile / nul / victoire extérieur), en comparant plusieurs approches : baseline Logistic Regression → MLP → LSTM/Transformer (PyTorch).
 
-Projet personnel de montée en compétences en deep learning, dans la continuité d'un premier projet en Logistic Regression One-vs-All + Elo ratings + Monte Carlo. Fait partie d'un repo multi-championnats — voir le [README racine](../README.md) pour la vue d'ensemble.
+Projet personnel de montée en compétences en deep learning, dans la continuité d'un premier projet en Logistic Regression One-vs-All + Elo ratings + Monte Carlo.
 
 > Commandes courantes (mise à jour des données, entraînement, prédiction) : voir [COMMANDS.md](COMMANDS.md).
 > **Toutes les commandes ci-dessous s'exécutent depuis ce dossier** (`cd PL` depuis la racine du repo).
