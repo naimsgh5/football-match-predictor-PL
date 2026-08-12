@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 WINDOW = 10
+CONGESTION_WINDOW_DAYS = 10
 
 
 def add_form_features(df: pd.DataFrame, n: int = WINDOW):
@@ -66,6 +67,34 @@ def add_venue_form_features(df: pd.DataFrame, n: int = WINDOW):
     out["form_away_specific"] = form_away_specific
     out["venue_form_diff"] = out["form_home_specific"] - out["form_away_specific"]
     return out, home_history, away_history
+
+
+def add_congestion_features(df: pd.DataFrame, window_days: int = CONGESTION_WINDOW_DAYS):
+    """Proxy d'enchaînement de matchs (donc de risque de rotation du 11 de départ) : nombre de
+    matchs joués par chaque équipe dans les `window_days` jours précédant le match courant
+    (celui-ci exclu). Limite connue : ne compte que les matchs Premier League présents dans ce
+    dataset, pas les matchs de coupe/Europe (absents de la source) — sous-estime donc la vraie
+    fatigue d'une équipe engagée sur plusieurs tableaux, mais reste calculable sans nouvelle
+    source de données.
+
+    congestion_diff = congestion_away - congestion_home (même convention que les autres _diff :
+    positif = favorable au domicile, ici parce que l'extérieur a joué plus recemment/souvent)."""
+    match_dates: dict[str, list[pd.Timestamp]] = {}
+    congestion_home, congestion_away = [], []
+
+    for date, home, away in zip(df["date"], df["home_team"], df["away_team"]):
+        cutoff = date - pd.Timedelta(days=window_days)
+        congestion_home.append(sum(1 for d in match_dates.get(home, []) if d > cutoff))
+        congestion_away.append(sum(1 for d in match_dates.get(away, []) if d > cutoff))
+
+        match_dates.setdefault(home, []).append(date)
+        match_dates.setdefault(away, []).append(date)
+
+    out = df.copy()
+    out["congestion_home"] = congestion_home
+    out["congestion_away"] = congestion_away
+    out["congestion_diff"] = out["congestion_away"] - out["congestion_home"]
+    return out, match_dates
 
 
 def add_goals_features(df: pd.DataFrame, n: int = WINDOW, default_avg: float = 1.3):

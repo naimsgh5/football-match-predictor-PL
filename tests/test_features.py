@@ -53,3 +53,10 @@ def test_elo_starts_at_initial_rating_for_new_teams(full_dataset):
     first_match = full_dataset.iloc[0]
     assert first_match["elo_home"] == 1500
     assert first_match["elo_away"] == 1500
+
+
+def test_congestion_is_zero_without_recent_history(full_dataset):
+    first_match = full_dataset.iloc[0]
+    assert first_match["congestion_diff"] == 0, (
+        "Le tout premier match du dataset ne doit avoir aucun historique recent -> congestion_diff=0 attendu"
+    )

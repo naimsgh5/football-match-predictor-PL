@@ -48,8 +48,9 @@ pip install -r requirements.txt
   - Modules dans `src/features/` : Elo pré-match, forme glissante (10 derniers matchs), buts marqués/encaissés glissants, head-to-head, classement moyen des 5 dernières saisons complètes
   - Utilitaire blessures/valeur marchande (`market_value_injuries.py`) — réservé à l'inférence sur un match à venir, pas utilisable comme feature d'entraînement (pas d'historique de blessures disponible)
   - Tests anti-fuite temporelle (`tests/test_features.py`) : 2 bugs de fuite détectés et corrigés (tri de date non stable, moyenne de buts de repli calculée sur le dataset entier au lieu de l'historique déjà connu)
-  - Dataset final : `data/processed/premier_league_features.parquet`, 1900 matchs × 7 features (`elo_diff`, `form_diff`, `venue_form_diff`, `h2h_home_win_rate`, `attack_diff`, `defense_diff`, `rank_diff`)
+  - Dataset final : `data/processed/premier_league_features.parquet`, 1900 matchs × 8 features (`elo_diff`, `form_diff`, `venue_form_diff`, `h2h_home_win_rate`, `attack_diff`, `defense_diff`, `rank_diff`, `congestion_diff`)
   - `venue_form_diff` : forme calculée séparément à domicile / à l'extérieur (ajoutée après coup, cf M3)
+  - `congestion_diff` (ajoutée après coup, cf M4) : proxy d'enchaînement de matchs / risque de rotation du 11 de départ — nombre de matchs joués par chaque équipe dans les 10 jours précédents. Limite connue : ne compte que les matchs PL de ce dataset, pas les matchs de coupe/Europe (source absente) — sous-estime la vraie fatigue d'une équipe engagée sur plusieurs tableaux. Non nulle sur 13.8% des matchs (période des fêtes, journées en semaine)
 
 - [x] **M3 — Baseline Logistic Regression**
   - `src/models/baseline_lr.py` : sklearn `LogisticRegression` multinomiale, features standardisées (`StandardScaler`)
@@ -66,6 +67,7 @@ pip install -r requirements.txt
   - Entraînement full-batch (train tient en un seul batch vu la petite taille) avec early stopping sur le log-loss de validation
   - Résultats : accuracy 53.4% (val) / 49.5% (test), log-loss 0.982 / 1.033 — légère amélioration sur toute la ligne par rapport à la baseline LR (52.1% / 47.9%, log-loss 0.996 / 1.040)
   - Même limite que M3 : le nul reste ignoré (0% recall) sur les deux modèles — signal faible dans les features actuelles plutôt que limite de capacité du modèle
+  - Réentraîné après l'ajout de `congestion_diff` : LR 51.6%/47.6%, MLP 51.6%/47.6% (léger recul, bruit probable vu la taille du dataset) — coefficient LR modeste (0.042, 6e sur 8) mais non négligeable, feature conservée pour M5 et calculée automatiquement dans `predict.py` (`match_date`, défaut = aujourd'hui)
 
 - [ ] M5 — LSTM/Transformer (PyTorch)
 - [ ] M6 — Évaluation finale et comparaison des modèles

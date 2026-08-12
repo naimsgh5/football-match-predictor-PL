@@ -8,7 +8,12 @@ import pandas as pd
 from src.features.elo import add_elo_features
 from src.features.head_to_head import add_h2h_features
 from src.features.historical_rank import add_historical_rank_features
-from src.features.rolling_stats import add_form_features, add_goals_features, add_venue_form_features
+from src.features.rolling_stats import (
+    add_congestion_features,
+    add_form_features,
+    add_goals_features,
+    add_venue_form_features,
+)
 
 RAW_PATH = "data/raw/premier_league_results.csv"
 OUT_PATH = "data/processed/premier_league_features.parquet"
@@ -21,6 +26,7 @@ FEATURE_COLUMNS = [
     "attack_diff",
     "defense_diff",
     "rank_diff",
+    "congestion_diff",
 ]
 
 
@@ -56,11 +62,9 @@ def build_dataset_with_state(raw_path: str = RAW_PATH):
     df, scored, conceded = add_goals_features(df)
     df, h2h_history = add_h2h_features(df)
     df, standings = add_historical_rank_features(df)
+    df, match_dates = add_congestion_features(df)
 
-    last_match_date = {}
-    for team in set(df["home_team"]) | set(df["away_team"]):
-        team_dates = df.loc[(df["home_team"] == team) | (df["away_team"] == team), "date"]
-        last_match_date[team] = team_dates.max()
+    last_match_date = {team: max(dates) for team, dates in match_dates.items()}
 
     state = {
         "elo": elo_final,
@@ -71,6 +75,7 @@ def build_dataset_with_state(raw_path: str = RAW_PATH):
         "conceded": conceded,
         "h2h_history": h2h_history,
         "standings": standings,
+        "match_dates": match_dates,
         "last_match_date": last_match_date,
     }
     return df, state

@@ -13,13 +13,14 @@ import sys
 
 import joblib
 import numpy as np
+import pandas as pd
 
 from src.evaluation.metrics import RESULT_LABELS
 from src.features.build_dataset import FEATURE_COLUMNS, build_dataset_with_state
 from src.features.head_to_head import WINDOW as H2H_WINDOW
 from src.features.historical_rank import N_SEASONS, average_rank
 from src.features.market_value_injuries import injury_strength
-from src.features.rolling_stats import WINDOW as FORM_WINDOW
+from src.features.rolling_stats import CONGESTION_WINDOW_DAYS, WINDOW as FORM_WINDOW
 from src.features.squad_values import SQUAD_VALUES
 
 MODEL_PATH = "models_saved/baseline_lr.joblib"
@@ -66,7 +67,16 @@ def _rank_diff(home, away, standings, n_seasons=N_SEASONS):
     return rank_away - rank_home, rank_home, rank_away
 
 
-def compute_features(home: str, away: str, state: dict):
+def _congestion(team, match_dates, target_date, window_days=CONGESTION_WINDOW_DAYS):
+    """Nombre de matchs PL joues par `team` dans les `window_days` jours avant `target_date`.
+    Meme limite qu'a l'entrainement : ne voit que les matchs PL de ce dataset, pas les matchs
+    de coupe/Europe."""
+    cutoff = target_date - pd.Timedelta(days=window_days)
+    dates = match_dates.get(team, [])
+    return sum(1 for d in dates if cutoff < d < target_date)
+
+
+def compute_features(home: str, away: str, state: dict, match_date=None):
     elo_home = state["elo"].get(home, 1500)
     elo_away = state["elo"].get(away, 1500)
 
@@ -83,6 +93,10 @@ def compute_features(home: str, away: str, state: dict):
 
     rank_diff, rank_home, rank_away = _rank_diff(home, away, state["standings"])
 
+    target_date = pd.Timestamp(match_date) if match_date is not None else pd.Timestamp.now().normalize()
+    congestion_home = _congestion(home, state["match_dates"], target_date)
+    congestion_away = _congestion(away, state["match_dates"], target_date)
+
     features = {
         "elo_diff": elo_home - elo_away,
         "form_diff": form_diff,
@@ -91,8 +105,13 @@ def compute_features(home: str, away: str, state: dict):
         "attack_diff": gs_home - gs_away,
         "defense_diff": gc_away - gc_home,
         "rank_diff": rank_diff,
+        "congestion_diff": congestion_away - congestion_home,
     }
-    context = {"elo_home": elo_home, "elo_away": elo_away, "rank_home": rank_home, "rank_away": rank_away}
+    context = {
+        "elo_home": elo_home, "elo_away": elo_away,
+        "rank_home": rank_home, "rank_away": rank_away,
+        "congestion_home": congestion_home, "congestion_away": congestion_away,
+    }
     return features, context
 
 
@@ -188,11 +207,15 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
                    home_position: int = None, home_points: int = None,
                    away_position: int = None, away_points: int = None,
                    odds_1x2=None, odds_blend=ODDS_BLEND_WEIGHT,
-                   stakes_home: str = None, stakes_away: str = None, derby: bool = False):
+                   stakes_home: str = None, stakes_away: str = None, derby: bool = False,
+                   match_date=None):
     """Retourne {"home": p, "draw": p, "away": p} et affiche un résumé.
 
     Calculés automatiquement (aucune saisie) : elo, forme, forme domicile/exterieur, h2h,
-    buts, classement moyen 5 ans.
+    buts, classement moyen 5 ans, enchainement de matchs (congestion_diff, sur match_date -
+    par defaut la date du jour ; ne compte que les matchs PL de ce dataset, pas les matchs
+    de coupe/Europe -- sous-estime la vraie fatigue d'une equipe engagee sur plusieurs
+    tableaux, complete avec rest_days_diff si tu connais mieux la situation reelle).
 
     À saisir toi-même (le modèle ne les connaît pas) :
       - injured_home / injured_away : listes de noms de joueurs absents
@@ -216,7 +239,7 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
         if team not in state["elo"]:
             print(f"! '{team}' absent du dataset (equipe jamais rencontree ou nom mal orthographie).")
 
-    features, context = compute_features(home, away, state)
+    features, context = compute_features(home, away, state, match_date=match_date)
     x = np.array([[features[c] for c in FEATURE_COLUMNS]])
     x_scaled = scaler.transform(x)
     proba = dict(zip(model.classes_, model.predict_proba(x_scaled)[0]))
@@ -225,6 +248,8 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
     print(f"\n{home} (domicile) vs {away} (exterieur)")
     print(f"  Elo  : {context['elo_home']:.0f} vs {context['elo_away']:.0f}")
     print(f"  Rang moyen {N_SEASONS} dernieres saisons : {context['rank_home']:.1f} vs {context['rank_away']:.1f}")
+    print(f"  Enchainement ({CONGESTION_WINDOW_DAYS}j, matchs PL seulement) : "
+          f"{home} {context['congestion_home']} vs {away} {context['congestion_away']}")
     print(f"  Modele seul -> Domicile {p_home*100:.1f}% / Nul {p_draw*100:.1f}% / Exterieur {p_away*100:.1f}%")
 
     if injured_home or injured_away:
