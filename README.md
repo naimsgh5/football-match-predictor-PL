@@ -28,6 +28,11 @@ models_saved/  # checkpoints (non versionné)
 pip install -r requirements.txt
 ```
 
+> Environnement local : `C:` étant saturé (peu d'espace libre), l'environnement conda du
+> projet vit sur `E:\conda_envs\football-dl` plutôt que dans l'install Anaconda par défaut.
+> `python -m ...` depuis ce README suppose `E:\conda_envs\football-dl\python.exe` sur le PATH
+> (ou à appeler explicitement).
+
 ## Milestones
 
 - [x] **M0 — Setup du repo**
@@ -54,6 +59,13 @@ pip install -r requirements.txt
   - `src/evaluation/metrics.py` : fonctions d'évaluation réutilisées pour M4/M5 (accuracy, log-loss, matrice de confusion)
   - `src/models/predict.py` : prédiction d'un match précis à venir (`python -m src.models.predict "Arsenal" "Chelsea"`), recalcule les features automatiques à partir de l'état final de l'historique ; ajustements optionnels post-hoc, saisis à la main (jamais appris par le modèle) : blessures/valeur marchande (`src/features/squad_values.py`), jours de repos, classement/points actuels (saison en cours, absente du dataset), enjeu du match (titre/europe/maintien/derby), cotes bookmaker (moyenne marché, marge retirée)
   - Réentraîné après l'ajout de `venue_form_diff` : accuracy 52.1%/47.9% (quasi identique, `venue_form_diff` a peu d'importance pour un modèle linéaire — à surveiller sur MLP/LSTM)
-- [ ] M4 — MLP (PyTorch)
+  - `src/features/squad_values.py` : valeurs marchandes rafraîchies depuis transfermarkt.co.uk (effectifs complets, 20 clubs)
+
+- [x] **M4 — MLP (PyTorch)**
+  - `src/models/mlp.py` : réseau dense simple (2 couches cachées 32/16, dropout 0.3, Adam), mêmes features/split que M3
+  - Entraînement full-batch (train tient en un seul batch vu la petite taille) avec early stopping sur le log-loss de validation
+  - Résultats : accuracy 53.4% (val) / 49.5% (test), log-loss 0.982 / 1.033 — légère amélioration sur toute la ligne par rapport à la baseline LR (52.1% / 47.9%, log-loss 0.996 / 1.040)
+  - Même limite que M3 : le nul reste ignoré (0% recall) sur les deux modèles — signal faible dans les features actuelles plutôt que limite de capacité du modèle
+
 - [ ] M5 — LSTM/Transformer (PyTorch)
 - [ ] M6 — Évaluation finale et comparaison des modèles
