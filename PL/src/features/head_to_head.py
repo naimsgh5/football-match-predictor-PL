@@ -1,11 +1,11 @@
-"""Taux de victoire glissant entre les deux équipes d'un match (confrontations directes).
+"""Rolling win rate between the two teams in a match (head-to-head).
 
-Note par rapport à algo/CLUBS_LOGISTIC_REGRESSION.ipynb : le calcul y mélangeait les
-perspectives domicile/extérieur (le taux stocké dépendait de qui recevait lors de la
-confrontation passée, pas de qui reçoit aujourd'hui). Ici l'historique est stocké du point
-de vue d'une équipe de référence fixe par paire, puis reconverti côté domicile du match
-courant — le taux reflète donc bien "l'équipe qui reçoit aujourd'hui a gagné X% des
-confrontations passées", quel que soit qui recevait à l'époque.
+Note vs algo/CLUBS_LOGISTIC_REGRESSION.ipynb: that version mixed up the home/away
+perspective (the stored rate depended on who was hosting in the past meeting, not who
+is hosting today). Here the history is stored from the point of view of a fixed
+reference team per pair, then converted back to the current match's home side — so the
+rate correctly reflects "the team hosting today won X% of past meetings", regardless
+of who was hosting back then.
 """
 import numpy as np
 import pandas as pd

@@ -1,9 +1,9 @@
-"""Tests anti-fuite temporelle : les features d'un match ne doivent jamais dépendre
-de matchs qui n'ont pas encore eu lieu à sa date.
+"""Anti-lookahead-leakage tests: a match's features must never depend on matches that
+haven't happened yet as of its date.
 
-Méthode : on construit le dataset sur l'historique complet, puis sur une version tronquée
-(uniquement les matchs jusqu'à une date de coupure). Les features des matchs présents dans
-les deux versions doivent être strictement identiques — sinon une feature "voit" le futur.
+Method: build the dataset on the full history, then on a truncated version (only matches
+up to a cutoff date). The features of matches present in both versions must be strictly
+identical — otherwise a feature is "seeing" the future.
 """
 from pathlib import Path
 
@@ -35,7 +35,7 @@ def test_no_lookahead_leakage(full_dataset):
         assert len(df_truncated) == len(df_full_prefix)
         for col in FEATURE_COLUMNS:
             assert np.allclose(df_full_prefix[col].values, df_truncated[col].values), (
-                f"Fuite de donnees detectee sur la colonne '{col}'"
+                f"Data leakage detected in column '{col}'"
             )
     finally:
         Path(TRUNCATED_PATH).unlink(missing_ok=True)
@@ -45,7 +45,7 @@ def test_first_season_has_no_rank_history(full_dataset):
     first_season = full_dataset["season"].min()
     rows = full_dataset[full_dataset["season"] == first_season]
     assert (rows["rank_diff"] == 0).all(), (
-        "La premiere saison du dataset ne doit avoir aucun historique de classement (rank_diff=0 attendu)"
+        "The dataset's first season should have no rank history (rank_diff=0 expected)"
     )
 
 
@@ -58,5 +58,5 @@ def test_elo_starts_at_initial_rating_for_new_teams(full_dataset):
 def test_congestion_is_zero_without_recent_history(full_dataset):
     first_match = full_dataset.iloc[0]
     assert first_match["congestion_diff"] == 0, (
-        "Le tout premier match du dataset ne doit avoir aucun historique recent -> congestion_diff=0 attendu"
+        "The dataset's very first match should have no recent history -> congestion_diff=0 expected"
     )

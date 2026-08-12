@@ -1,6 +1,6 @@
-"""Assemble le dataset de features prêt pour l'entraînement, à partir des données brutes PL.
+"""Assembles the training-ready feature dataset from raw PL data.
 
-Usage : python -m src.features.build_dataset
+Usage: python -m src.features.build_dataset
 """
 import numpy as np
 import pandas as pd
@@ -40,17 +40,17 @@ def build_dataset(raw_path: str = RAW_PATH) -> pd.DataFrame:
 
 
 def build_dataset_with_state(raw_path: str = RAW_PATH):
-    """Comme build_dataset, mais retourne aussi (df, state) où state contient l'historique
-    final de chaque module (elo, forme, buts, h2h, classement) — nécessaire pour calculer
-    les features d'un match futur (hors dataset) au moment de l'inférence."""
+    """Same as build_dataset, but also returns (df, state) where state holds the final
+    history of each module (elo, form, goals, h2h, standings) — needed to compute the
+    features of a future match (outside the dataset) at inference time."""
     df = pd.read_csv(raw_path, parse_dates=["date"])
-    # tri stable : plusieurs matchs partagent la meme date (derniere journee de saison),
-    # un tri instable romprait ces egalites differemment selon le sous-ensemble de lignes
-    # traite, ce qui ferait diverger l'Elo (sensible a l'ordre de traitement)
+    # stable sort: several matches share the same date (last matchday of a season), an
+    # unstable sort would break these ties differently depending on the subset of rows
+    # processed, which would make the Elo diverge (sensitive to processing order)
     df = df.sort_values("date", kind="stable").reset_index(drop=True)
     df["season"] = df["date"].apply(_get_season)
 
-    # 2 = victoire domicile, 1 = nul, 0 = victoire extérieur
+    # 2 = home win, 1 = draw, 0 = away win
     df["result"] = np.where(
         df["home_score"] > df["away_score"], 2,
         np.where(df["home_score"] == df["away_score"], 1, 0),
@@ -85,9 +85,9 @@ if __name__ == "__main__":
     df = build_dataset()
     df.to_parquet(OUT_PATH, index=False)
 
-    print(f"{len(df)} matchs, {len(FEATURE_COLUMNS)} features -> {OUT_PATH}")
+    print(f"{len(df)} matches, {len(FEATURE_COLUMNS)} features -> {OUT_PATH}")
     print()
-    print("Repartition des resultats (0=exterieur, 1=nul, 2=domicile) :")
+    print("Result distribution (0=away, 1=draw, 2=home):")
     print(df["result"].value_counts(normalize=True).sort_index())
     print()
     print(df[["date", "home_team", "away_team", "result"] + FEATURE_COLUMNS].tail())

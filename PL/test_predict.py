@@ -1,15 +1,15 @@
-"""Bac a sable pour tester des predictions a la main.
+"""Sandbox for testing predictions by hand.
 
-A editer librement puis lancer avec :
+Edit freely then run with:
     E:\\conda_envs\\football-dl\\python.exe test_predict.py
 
-(ne pas coller ce code directement dans PowerShell -- c'est du Python, pas du PowerShell ;
- il faut soit l'executer via ce fichier, soit via `python -c "..."` sur une seule ligne)
+(don't paste this code directly into PowerShell -- it's Python, not PowerShell;
+ either run it via this file, or via `python -c "..."` on a single line)
 """
 from src.models.predict import predict_match
 
 
-# --- Exemple 2 : avec ajustements manuels -------------------------------------------------
+# --- Example: with manual adjustments -------------------------------------------------
 predict_match(
     "Man United", "Man City",
     injured_home=["Luke Shaw"],
@@ -17,9 +17,9 @@ predict_match(
     rest_days_diff=0,
     home_position=2, home_points=65,
     away_position=1, away_points=67,
-    stakes_home="titre",
-    stakes_away="titre",
+    stakes_home="title",
+    stakes_away="title",
     derby=True,
-    odds_1x2={"1": 2.2, "X": 3, "2":2.0},
+    odds_1x2={"1": 2.2, "X": 3, "2": 2.0},
     match_date="2026-01-02",
 )

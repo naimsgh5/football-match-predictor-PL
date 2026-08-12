@@ -1,11 +1,11 @@
-"""MLP (PyTorch) sur les mêmes features et le même split temporel que la baseline LR (M3).
+"""MLP (PyTorch) on the same features and temporal split as the baseline LR (M3).
 
-Petit réseau (2 couches cachées, dropout) volontairement simple : le train set ne fait que
-~1140 lignes pour 7 features, un modèle trop capacitaire overfitterait instantanément.
-Entraînement full-batch (tout le train tient en un seul batch) avec early stopping sur le
-log-loss de validation.
+Small network (2 hidden layers, dropout), deliberately simple: the train set is only
+~1140 rows for 7 features, a model with too much capacity would overfit instantly.
+Full-batch training (the whole train set fits in a single batch) with early stopping on
+validation log-loss.
 
-Usage : python -m src.models.mlp
+Usage: python -m src.models.mlp
 """
 import os
 
@@ -20,14 +20,14 @@ from src.evaluation.metrics import RESULT_LABELS, evaluate
 from src.features.build_dataset import FEATURE_COLUMNS, OUT_PATH
 
 VAL_SEASON = 2024
-TEST_SEASON = 2025  # train = toutes les saisons strictement avant VAL_SEASON
+TEST_SEASON = 2025  # train = every season strictly before VAL_SEASON
 
 HIDDEN_SIZES = (32, 16)
 DROPOUT = 0.3
 LR = 1e-3
 WEIGHT_DECAY = 1e-4
 MAX_EPOCHS = 1000
-PATIENCE = 50  # early stopping sur le log-loss de validation
+PATIENCE = 50  # early stopping on validation log-loss
 SEED = 42
 
 MODEL_PATH = "models_saved/mlp.pt"
@@ -100,10 +100,10 @@ def train_model(X_train, y_train, X_val, y_val, input_dim: int):
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= PATIENCE:
-                print(f"Early stopping a l'epoch {epoch + 1} (meilleur val_loss={best_val_loss:.4f})")
+                print(f"Early stopping at epoch {epoch + 1} (best val_loss={best_val_loss:.4f})")
                 break
     else:
-        print(f"MAX_EPOCHS atteint (meilleur val_loss={best_val_loss:.4f})")
+        print(f"MAX_EPOCHS reached (best val_loss={best_val_loss:.4f})")
 
     model.load_state_dict(best_state)
     return model, history
@@ -119,9 +119,9 @@ def predict_proba(model: MLP, X: np.ndarray) -> np.ndarray:
 
 def main():
     train, val, test = load_splits()
-    print(f"Train : {len(train)} matchs (saisons < {VAL_SEASON})")
-    print(f"Val   : {len(val)} matchs (saison {VAL_SEASON})")
-    print(f"Test  : {len(test)} matchs (saison {TEST_SEASON})")
+    print(f"Train : {len(train)} matches (seasons < {VAL_SEASON})")
+    print(f"Val   : {len(val)} matches (season {VAL_SEASON})")
+    print(f"Test  : {len(test)} matches (season {TEST_SEASON})")
     print()
 
     X_train, y_train = to_xy(train)
@@ -136,7 +136,7 @@ def main():
     majority_class = pd.Series(y_train).mode()[0]
     naive_val_acc = (y_val == majority_class).mean()
     naive_test_acc = (y_test == majority_class).mean()
-    print(f"Baseline naive (toujours predire '{RESULT_LABELS[majority_class]}') "
+    print(f"Naive baseline (always predict '{RESULT_LABELS[majority_class]}') "
           f"- Val: {naive_val_acc:.3f}  Test: {naive_test_acc:.3f}")
     print()
 
@@ -145,16 +145,16 @@ def main():
 
     y_val_proba = predict_proba(model, X_val_sc)
     y_val_pred = y_val_proba.argmax(axis=1)
-    evaluate(y_val, y_val_pred, y_val_proba, label=f"VALIDATION (saison {VAL_SEASON})")
+    evaluate(y_val, y_val_pred, y_val_proba, label=f"VALIDATION (season {VAL_SEASON})")
 
     y_test_proba = predict_proba(model, X_test_sc)
     y_test_pred = y_test_proba.argmax(axis=1)
-    evaluate(y_test, y_test_pred, y_test_proba, label=f"TEST (saison {TEST_SEASON})")
+    evaluate(y_test, y_test_pred, y_test_proba, label=f"TEST (season {TEST_SEASON})")
 
     os.makedirs("models_saved", exist_ok=True)
     torch.save(model.state_dict(), MODEL_PATH)
     joblib.dump(scaler, SCALER_PATH)
-    print(f"Modele sauvegarde -> {MODEL_PATH}")
+    print(f"Model saved -> {MODEL_PATH}")
 
     return history
 

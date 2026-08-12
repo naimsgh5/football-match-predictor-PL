@@ -1,14 +1,14 @@
-"""Valeurs marchandes des effectifs Premier League, en millions d'euros.
+"""Premier League squad market values, in millions of euros.
 
-Source : transfermarkt.co.uk, effectifs et valeurs saison 2026/27 (recupere le 2026-08-12).
-Couvre les 20 clubs de Premier League pour la saison 2026/27. Burnley, West Ham et Wolves
-ont ete relegues en Championship a l'issue de 2025/26 et sont remplaces ici par les 3
-clubs promus : Ipswich, Coventry et Hull. Ces 3 derniers n'ont pas ou peu d'historique
-dans le dataset d'entrainement (features Elo/classement/forme peu ou pas fiables pour
-eux en l'etat), donc predict.py ne devrait pas encore etre utilise pour leurs matchs.
+Source: transfermarkt.co.uk, 2026/27 season squads and values (fetched 2026-08-12).
+Covers the 20 Premier League clubs for the 2026/27 season. Burnley, West Ham and Wolves
+were relegated to the Championship at the end of 2025/26 and are replaced here by the 3
+promoted clubs: Ipswich, Coventry and Hull. These last 3 have little to no history in
+the training dataset (Elo/rank/form features are unreliable or unavailable for them as
+things stand), so predict.py shouldn't be used for their matches yet.
 
-A remettre a jour a chaque fenetre de transferts. Utilise par
-src/features/market_value_injuries.py pour ponderer l'impact des absences dans
+To be updated at every transfer window. Used by
+src/features/market_value_injuries.py to weight the impact of absences in
 src/models/predict.py.
 """
 

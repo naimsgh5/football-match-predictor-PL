@@ -1,60 +1,60 @@
-# Commandes utiles
+# Useful commands
 
-Aide-mémoire des commandes courantes du projet Premier League. **Tout se lance depuis ce
-dossier** (`e:\PROJET DL\PL`) :
+Cheat sheet of common commands for the Premier League project. **Everything runs from
+this folder** (`e:\PROJET DL\PL`):
 
 ```powershell
 cd "e:\PROJET DL\PL"
 ```
 
-Avec l'interpréteur Python de l'environnement conda sur `E:` (le disque `C:` est saturé, voir README) :
+Using the Python interpreter from the conda environment on `E:` (drive `C:` is nearly
+full, see README):
 
 ```
 E:\conda_envs\football-dl\python.exe
 ```
 
-Pour éviter de le retaper à chaque fois, tu peux l'ajouter temporairement à ta session
-PowerShell :
+To avoid retyping it every time, you can set it temporarily for your PowerShell session:
 ```powershell
 $py = "E:\conda_envs\football-dl\python.exe"
 ```
-puis utiliser `& $py ...` dans les commandes ci-dessous (sinon, remplace `python` par le
-chemin complet à chaque fois).
+then use `& $py ...` in the commands below (otherwise, replace `python` with the full
+path each time).
 
 ---
 
-## Mettre à jour les données
+## Update the data
 
-Le dataset (`data/raw/premier_league_results.csv`) est mis à jour **à la main** (pas
-d'automatisation pour l'instant) :
+The dataset (`data/raw/premier_league_results.csv`) is updated **by hand** (no
+automation yet):
 
-1. Retélécharger les derniers résultats Premier League (ex. depuis football-data.co.uk,
-   même source que `data/raw/E0_2025_26_footballdata.csv`)
-2. Fusionner les nouveaux matchs dans `data/raw/premier_league_results.csv` (même méthode
-   qu'en M1 : pas de doublon, pas de divergence de score sur les matchs déjà présents)
-3. Régénérer le dataset de features :
+1. Re-download the latest Premier League results (e.g. from football-data.co.uk, the
+   same source as `data/raw/E0_2025_26_footballdata.csv`)
+2. Merge the new matches into `data/raw/premier_league_results.csv` (same method as
+   in M1: no duplicates, no score discrepancies on matches already present)
+3. Regenerate the feature dataset:
 
 ```powershell
 E:\conda_envs\football-dl\python.exe -m src.features.build_dataset
 ```
 
-Fréquence conseillée : une fois par semaine en saison (les équipes jouent ~1x/semaine),
-et surtout **juste avant** de prédire un match précis, pour que l'historique soit à jour.
+Recommended frequency: once a week during the season (teams play ~1x/week), and
+especially **right before** predicting a specific match, so the history is up to date.
 
 ---
 
-## Vérifier que tout fonctionne (tests)
+## Check everything still works (tests)
 
 ```powershell
 E:\conda_envs\football-dl\python.exe -m pytest tests/ -v
 ```
 
-À relancer après toute modification des features ou du dataset (anti-fuite temporelle,
-cohérence des marchés Poisson, etc.).
+Rerun after any change to the features or the dataset (anti-lookahead-leakage,
+Poisson market consistency, etc.).
 
 ---
 
-## Réentraîner les modèles
+## Retrain the models
 
 ```powershell
 # Baseline Logistic Regression (M3)
@@ -64,71 +64,71 @@ E:\conda_envs\football-dl\python.exe -m src.models.baseline_lr
 E:\conda_envs\football-dl\python.exe -m src.models.mlp
 ```
 
-À refaire après avoir régénéré le dataset (nouvelle feature, données mises à jour, etc.).
-Sauvegarde automatique dans `models_saved/` (non versionné).
+Redo this after regenerating the dataset (new feature, updated data, etc.).
+Automatically saved to `models_saved/` (not versioned).
 
 ---
 
-## Prédire un match
+## Predict a match
 
-Le plus simple : éditer [test_predict.py](test_predict.py) (à la racine) puis lancer :
+Easiest way: edit [test_predict.py](test_predict.py) (at the root) then run:
 
 ```powershell
 E:\conda_envs\football-dl\python.exe test_predict.py
 ```
 
-Exemple minimal (juste le modèle, aucun ajustement manuel) :
+Minimal example (model only, no manual adjustments):
 ```python
 from src.models.predict import predict_match
 predict_match("Arsenal", "Chelsea")
 ```
 
-Exemple complet (tous les ajustements manuels disponibles) :
+Full example (all available manual adjustments):
 ```python
 predict_match(
     "Man City", "Sunderland",
-    injured_home=["Rodri"],              # joueurs absents domicile
-    injured_away=[],                     # joueurs absents exterieur
-    rest_days_diff=2,                    # ecart de jours de repos (+ = domicile plus repose)
-    home_position=1, home_points=68,     # classement ACTUEL domicile
-    away_position=17, away_points=31,    # classement ACTUEL exterieur
-    stakes_home="titre",                 # "titre" / "europe" / "maintien" / "neutre"
-    stakes_away="maintien",
+    injured_home=["Rodri"],              # home players out
+    injured_away=[],                     # away players out
+    rest_days_diff=2,                    # rest-day gap (+ = home team more rested)
+    home_position=1, home_points=68,     # CURRENT home standings
+    away_position=17, away_points=31,    # CURRENT away standings
+    stakes_home="title",                 # "title" / "europe" / "survival" / "neutral"
+    stakes_away="survival",
     derby=False,                         # True/False
-    odds_1x2={"1": 1.25, "X": 6.5, "2": 11.0},  # cotes bookmaker
-    match_date="2026-01-02",             # date du match (defaut = aujourd'hui)
-    show_markets=True,                   # scores probables / BTTS / over-under (defaut True)
+    odds_1x2={"1": 1.25, "X": 6.5, "2": 11.0},  # bookmaker odds
+    match_date="2026-01-02",             # match date (default = today)
+    show_markets=True,                   # probable scores / BTTS / over-under (default True)
 )
 ```
 
-Ou en une ligne, sans passer par le fichier :
+Or in a single line, without going through the file:
 ```powershell
 E:\conda_envs\football-dl\python.exe -c "from src.models.predict import predict_match; predict_match('Arsenal', 'Chelsea')"
 ```
-(⚠ à taper directement dans le terminal, jamais coller du code Python multi-lignes tel quel
-dans PowerShell — ça casse : PowerShell essaie de l'interpréter comme du PowerShell, pas
-du Python)
+(⚠ type this directly into the terminal, never paste multi-line Python code as-is
+into PowerShell — it breaks: PowerShell tries to interpret it as PowerShell, not
+Python)
 
 ---
 
-## Mettre à jour les effectifs / valeurs marchandes
+## Update squads / market values
 
-Fichier : [src/features/squad_values.py](src/features/squad_values.py) — dict `SQUAD_VALUES`,
-un bloc par club, `"Nom Joueur": valeur_en_millions`. Édition manuelle directe, rien à
-réentraîner ensuite (utilisé uniquement par `predict_match()` pour pondérer l'impact des
-blessures, jamais par l'entraînement).
+File: [src/features/squad_values.py](src/features/squad_values.py) — `SQUAD_VALUES`
+dict, one block per club, `"Player Name": value_in_millions`. Direct manual edit,
+nothing to retrain afterwards (only used by `predict_match()` to weight the impact
+of injuries, never by training).
 
 ---
 
-## Récapitulatif express
+## Quick reference
 
-| Je veux... | Commande |
+| I want to... | Command |
 |---|---|
-| Mettre à jour le dataset | `python -m src.features.build_dataset` |
-| Vérifier que rien n'est cassé | `python -m pytest tests/ -v` |
-| Réentraîner la baseline LR | `python -m src.models.baseline_lr` |
-| Réentraîner le MLP | `python -m src.models.mlp` |
-| Prédire un match | éditer `test_predict.py` puis `python test_predict.py` |
-| Changer un effectif/valeur | éditer `src/features/squad_values.py` |
+| Update the dataset | `python -m src.features.build_dataset` |
+| Check nothing is broken | `python -m pytest tests/ -v` |
+| Retrain the baseline LR | `python -m src.models.baseline_lr` |
+| Retrain the MLP | `python -m src.models.mlp` |
+| Predict a match | edit `test_predict.py` then `python test_predict.py` |
+| Change a squad/value | edit `src/features/squad_values.py` |
 
-(remplacer `python` par `E:\conda_envs\football-dl\python.exe`)
+(replace `python` with `E:\conda_envs\football-dl\python.exe`)

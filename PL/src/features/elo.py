@@ -1,4 +1,4 @@
-"""Elo rating pré-match, calculé de façon strictement chronologique (aucune fuite du futur)."""
+"""Pre-match Elo rating, computed in strict chronological order (no leakage from the future)."""
 import pandas as pd
 
 INITIAL_RATING = 1500
@@ -6,10 +6,10 @@ K_FACTOR = 30
 
 
 def add_elo_features(df: pd.DataFrame, k: float = K_FACTOR, initial: float = INITIAL_RATING):
-    """Ajoute elo_home, elo_away, elo_diff. df doit être trié par date.
+    """Adds elo_home, elo_away, elo_diff. df must be sorted by date.
 
-    Retourne (df_avec_features, elo_final) — elo_final permet de réutiliser les ratings
-    à jour pour prédire un futur match sans recalculer tout l'historique.
+    Returns (df_with_features, elo_final) — elo_final allows reusing the up-to-date
+    ratings to predict a future match without recomputing the whole history.
     """
     elo: dict[str, float] = {}
     elo_home, elo_away = [], []

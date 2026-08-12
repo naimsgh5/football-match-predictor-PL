@@ -1,23 +1,23 @@
-"""Ajustement pour joueurs absents, pondéré par leur poids dans la valeur marchande de l'effectif.
+"""Adjustment for missing players, weighted by their share of the squad's market value.
 
-Contrairement aux autres modules de src/features/, ceci n'est PAS une feature d'entraînement :
-on n'a pas d'historique des blessures pour les 1900 matchs passés, donc rien à backfill. Cet
-utilitaire sert à l'inférence, pour ajuster une prédiction sur un match à venir dont on connaît
-les absences — même logique que algo/CLUBS_LOGISTIC_REGRESSION.ipynb (squad_values + injury_strength).
+Unlike the other modules in src/features/, this is NOT a training feature: there's no
+injury history for the 1900 past matches, so there's nothing to backfill. This utility is
+used at inference time, to adjust a prediction for an upcoming match whose absences are
+known — same logic as algo/CLUBS_LOGISTIC_REGRESSION.ipynb (squad_values + injury_strength).
 
-squad_values doit être rempli à la main, par équipe : {"Arsenal": {"Bukayo Saka": 150, ...}, ...}
-(valeurs en millions d'euros). Voir algo/CLUBS_LOGISTIC_REGRESSION.ipynb pour un exemple rempli.
+squad_values must be filled in by hand, per club: {"Arsenal": {"Bukayo Saka": 150, ...}, ...}
+(values in millions of euros). See algo/CLUBS_LOGISTIC_REGRESSION.ipynb for a filled-in example.
 """
 
-MAX_IMPACT = 0.80   # part maximale de la valeur d'effectif considérée comme "absente"
-IMPACT_SCALE = 0.50  # atténuation appliquée à la probabilité du modèle
+MAX_IMPACT = 0.80   # maximum share of squad value considered "missing"
+IMPACT_SCALE = 0.50  # dampening applied to the model's probability
 
 
 def injury_strength(team: str, injured_players: list[str], squad_values: dict[str, dict[str, float]]):
-    """Retourne (facteur_force in [0.5, 1], valeur_absente_M€, détail par joueur, joueurs inconnus).
+    """Returns (strength_factor in [0.5, 1], missing_value_M€, per-player detail, unknown players).
 
-    facteur_force multiplie le xG/la probabilité de victoire de l'équipe : 1.0 = effectif complet,
-    0.5 = pire cas (80% de la valeur d'effectif absente, plafonné).
+    strength_factor multiplies the team's win xG/probability: 1.0 = full squad,
+    0.5 = worst case (80% of squad value missing, capped).
     """
     squad = squad_values.get(team, {})
     if not squad or not injured_players:

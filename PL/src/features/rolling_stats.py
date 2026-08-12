@@ -1,7 +1,7 @@
-"""Forme récente et buts marqués/encaissés, en moyenne glissante sur les n derniers matchs.
+"""Recent form and goals scored/conceded, as a rolling average over the last n matches.
 
-Calcul pré-match strict : chaque valeur pour un match donné n'utilise que les matchs
-antérieurs de l'équipe concernée.
+Strict pre-match computation: each value for a given match only uses that team's
+earlier matches.
 """
 import numpy as np
 import pandas as pd
@@ -11,8 +11,8 @@ CONGESTION_WINDOW_DAYS = 10
 
 
 def add_form_features(df: pd.DataFrame, n: int = WINDOW):
-    """Ajoute form_home, form_away, form_diff (moyenne des résultats sur les n derniers matchs,
-    1=victoire, 0.5=nul, 0=défaite). Retourne aussi l'historique final par équipe."""
+    """Adds form_home, form_away, form_diff (average result over the last n matches,
+    1=win, 0.5=draw, 0=loss). Also returns the final per-team history."""
     history: dict[str, list[float]] = {}
     form_home, form_away = [], []
 
@@ -39,10 +39,9 @@ def add_form_features(df: pd.DataFrame, n: int = WINDOW):
 
 
 def add_venue_form_features(df: pd.DataFrame, n: int = WINDOW):
-    """Forme spécifique domicile/extérieur : contrairement à form_diff (mélange les matchs
-    domicile+extérieur de chaque équipe), ici l'équipe qui reçoit est évaluée uniquement sur
-    ses n derniers matchs À DOMICILE, et l'équipe qui se déplace uniquement sur ses n derniers
-    matchs À L'EXTÉRIEUR — certaines équipes sont beaucoup plus fortes chez elles qu'au loin."""
+    """Venue-specific form: unlike form_diff (which mixes each team's home+away matches),
+    here the home team is evaluated only on its last n HOME matches, and the away team only
+    on its last n AWAY matches — some teams are much stronger at home than on the road."""
     home_history: dict[str, list[float]] = {}
     away_history: dict[str, list[float]] = {}
     form_home_specific, form_away_specific = [], []
@@ -70,15 +69,16 @@ def add_venue_form_features(df: pd.DataFrame, n: int = WINDOW):
 
 
 def add_congestion_features(df: pd.DataFrame, window_days: int = CONGESTION_WINDOW_DAYS):
-    """Proxy d'enchaînement de matchs (donc de risque de rotation du 11 de départ) : nombre de
-    matchs joués par chaque équipe dans les `window_days` jours précédant le match courant
-    (celui-ci exclu). Limite connue : ne compte que les matchs Premier League présents dans ce
-    dataset, pas les matchs de coupe/Europe (absents de la source) — sous-estime donc la vraie
-    fatigue d'une équipe engagée sur plusieurs tableaux, mais reste calculable sans nouvelle
-    source de données.
+    """Proxy for fixture congestion (and thus squad-rotation risk): number of matches
+    played by each team in the `window_days` days preceding the current match (excluding
+    it). Known limitation: only counts Premier League matches present in this dataset, not
+    cup/European matches (not available in the source) — so it underestimates the true
+    fatigue of a team competing on multiple fronts, but stays computable without a new
+    data source.
 
-    congestion_diff = congestion_away - congestion_home (même convention que les autres _diff :
-    positif = favorable au domicile, ici parce que l'extérieur a joué plus recemment/souvent)."""
+    congestion_diff = congestion_away - congestion_home (same convention as the other
+    _diff columns: positive = favors the home team, here because the away team has played
+    more recently/often)."""
     match_dates: dict[str, list[pd.Timestamp]] = {}
     congestion_home, congestion_away = [], []
 
@@ -98,12 +98,12 @@ def add_congestion_features(df: pd.DataFrame, window_days: int = CONGESTION_WIND
 
 
 def add_goals_features(df: pd.DataFrame, n: int = WINDOW, default_avg: float = 1.3):
-    """Ajoute les moyennes glissantes de buts marqués/encaissés et les diffs attaque/défense.
+    """Adds rolling averages of goals scored/conceded and the attack/defense diffs.
 
-    Le repli pour une équipe sans historique (son tout premier match dans le dataset)
-    utilise la moyenne de buts cumulée des matchs déjà traités (pas la moyenne du dataset
-    entier, ce qui utiliserait des matchs futurs) — avant le tout premier match, un
-    default_avg fixe (~moyenne PL classique) sert d'amorce.
+    The fallback for a team with no history (its very first match in the dataset) uses
+    the cumulative goals average of matches already processed (not the whole dataset's
+    average, which would use future matches) — before the very first match ever, a fixed
+    default_avg (~typical PL average) seeds it.
     """
     scored: dict[str, list[int]] = {}
     conceded: dict[str, list[int]] = {}

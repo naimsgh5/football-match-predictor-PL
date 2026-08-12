@@ -1,5 +1,5 @@
-"""Tests de coherence du modele de buts Poisson (src/models/markets.py) : les probabilites
-calculees doivent former des distributions valides (sommer a 1, etc.)."""
+"""Consistency tests for the Poisson goal model (src/models/markets.py): the computed
+probabilities must form valid distributions (sum to 1, etc.)."""
 import numpy as np
 import pytest
 
@@ -14,7 +14,7 @@ def matrix():
 
 
 def test_matrix_sums_to_one(matrix):
-    # goal_matrix() renormalise pour compenser la troncature a MAX_GOALS
+    # goal_matrix() renormalizes to compensate for the MAX_GOALS truncation
     assert matrix.sum() == pytest.approx(1.0)
 
 
@@ -25,7 +25,7 @@ def test_btts_yes_no_sum_to_one(matrix):
 
 def test_over_under_plus_exact_line_sums_to_one(matrix):
     probs = over_under(matrix, 2.5)
-    # ligne .5 -> aucun total de buts ne tombe exactement dessus, over+under = tout
+    # .5 line -> no goal total lands exactly on it, over+under = everything
     assert probs["over"] + probs["under"] == pytest.approx(1.0)
 
 

@@ -1,20 +1,19 @@
-"""Classement moyen des n dernières saisons COMPLÈTES précédant la saison du match.
+"""Average final rank over the n COMPLETE seasons preceding the match's season.
 
-Correction par rapport à algo/CLUBS_LOGISTIC_REGRESSION.ipynb : là-bas, pl_avg_rank
-était calculé une fois sur TOUTES les saisons du CSV (passées et futures) puis appliqué
-identiquement à tous les matchs — une fuite de données pour un usage temporel (le
-classement d'un match de 2021 ne doit jamais dépendre de résultats de 2025). Ici, seules
-les saisons complètes et strictement antérieures à la saison du match sont utilisées.
+Fix vs algo/CLUBS_LOGISTIC_REGRESSION.ipynb: there, pl_avg_rank was computed once over
+ALL seasons in the CSV (past and future) then applied identically to every match — a
+data leak for a temporal use case (a 2021 match's rank must never depend on 2025
+results). Here, only complete seasons strictly before the match's season are used.
 """
 import numpy as np
 import pandas as pd
 
 N_SEASONS = 5
-FALLBACK_RANK = 20  # dernière place : pénalité pour équipe promue / sans historique
+FALLBACK_RANK = 20  # last place: penalty for a promoted team / no history
 
 
 def _season_final_standings(df: pd.DataFrame) -> dict[int, dict[str, int]]:
-    """Retourne {season: {team: rang_final}} à partir des matchs de chaque saison."""
+    """Returns {season: {team: final_rank}} from each season's matches."""
     standings = {}
     for season, sg in df.groupby("season"):
         teams = set(sg["home_team"]) | set(sg["away_team"])
@@ -39,18 +38,18 @@ def _season_final_standings(df: pd.DataFrame) -> dict[int, dict[str, int]]:
 
 
 def average_rank(team: str, standings: dict[int, dict[str, int]], seasons: list[int], fallback: int = FALLBACK_RANK) -> float:
-    """Rang moyen d'une équipe sur une liste de saisons données (celles où elle est absente
-    des standings, ex: équipe pas encore en PL, sont ignorées ; fallback si aucune trouvée)."""
+    """Average rank of a team over a given list of seasons (seasons where the team is
+    absent from the standings, e.g. not yet in the PL, are skipped; fallback if none found)."""
     ranks = [standings[s][team] for s in seasons if team in standings[s]]
     return float(np.mean(ranks)) if ranks else float(fallback)
 
 
 def add_historical_rank_features(df: pd.DataFrame, n_seasons: int = N_SEASONS, fallback: int = FALLBACK_RANK):
-    """Ajoute rank_home, rank_away, rank_diff : rang final moyen de l'équipe sur les
-    n_seasons saisons complètes précédant strictement la saison du match courant.
+    """Adds rank_home, rank_away, rank_diff: the team's average final rank over the
+    n_seasons complete seasons strictly preceding the current match's season.
 
-    Retourne (df_avec_features, standings) — standings permet de calculer le classement
-    d'un futur match (au-delà des saisons du dataset) sans tout recalculer."""
+    Returns (df_with_features, standings) — standings allows computing the rank for a
+    future match (beyond the dataset's seasons) without recomputing everything."""
     standings = _season_final_standings(df)
     seasons_sorted = sorted(standings.keys())
 

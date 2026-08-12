@@ -1,12 +1,12 @@
-"""Prédiction d'un match à venir (jamais vu à l'entraînement) avec le modèle déjà entraîné.
+"""Predicts an upcoming match (never seen during training) with the already-trained model.
 
-Recalcule les features "coeur" (Elo, forme, forme domicile/extérieur, h2h, buts, classement
-5 ans) à partir de l'état final de l'historique complet, puis applique des ajustements
-optionnels *post-hoc* (le modèle n'a jamais appris dessus, ils ne font que déplacer la
-probabilité finale, comme dans algo/CLUBS_LOGISTIC_REGRESSION.ipynb) : blessures/valeur
-marchande, jours de repos, classement/points actuels, cotes bookmaker.
+Recomputes the "core" features (Elo, form, home/away form, h2h, goals, 5-season rank)
+from the final state of the full history, then applies optional *post-hoc* adjustments
+(the model never learned from these, they only shift the final probability, as in
+algo/CLUBS_LOGISTIC_REGRESSION.ipynb): injuries/market value, rest days, current
+standings/points, bookmaker odds.
 
-Usage :
+Usage:
     python -m src.models.predict "Arsenal" "Chelsea"
 """
 import sys
@@ -27,15 +27,15 @@ from src.models.markets import OU_LINES, betting_notes, btts, expected_goals, go
 MODEL_PATH = "models_saved/baseline_lr.joblib"
 SCALER_PATH = "models_saved/baseline_lr_scaler.joblib"
 DEFAULT_GOALS_AVG = 1.3
-REST_DAY_IMPACT = 0.12       # impact maximal (asymptotique) des jours de repos sur les probas
-INJURY_IMPACT = 0.15         # impact maximal du facteur blessures sur les probas
-STANDINGS_IMPACT = 0.15      # impact maximal de l'ecart de points actuel sur les probas
-STANDINGS_POINTS_SCALE = 15  # ecart de points (~15 pts) au dela duquel l'impact sature
-ODDS_BLEND_WEIGHT = 0.5      # 0 = modele pur, 1 = cotes pures
+REST_DAY_IMPACT = 0.12       # maximum (asymptotic) impact of rest days on the probabilities
+INJURY_IMPACT = 0.15         # maximum impact of the injury factor on the probabilities
+STANDINGS_IMPACT = 0.15      # maximum impact of the current points gap on the probabilities
+STANDINGS_POINTS_SCALE = 15  # points gap (~15 pts) beyond which the impact saturates
+ODDS_BLEND_WEIGHT = 0.5      # 0 = pure model, 1 = pure odds
 
 
 # ---------------------------------------------------------------------------
-# Features "coeur" (mêmes calculs qu'à l'entraînement, appliqués hors dataset)
+# "Core" features (same computations as at training time, applied outside the dataset)
 # ---------------------------------------------------------------------------
 
 def _team_form(team, form_history, n=FORM_WINDOW):
@@ -68,10 +68,19 @@ def _rank_diff(home, away, standings, n_seasons=N_SEASONS):
     return rank_away - rank_home, rank_home, rank_away
 
 
+def _ordinal(n: int) -> str:
+    """1 -> '1st', 2 -> '2nd', 3 -> '3rd', 11-13 -> 'th', 21 -> '21st', etc."""
+    if 11 <= n % 100 <= 13:
+        suffix = "th"
+    else:
+        suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
 def _congestion(team, match_dates, target_date, window_days=CONGESTION_WINDOW_DAYS):
-    """Nombre de matchs PL joues par `team` dans les `window_days` jours avant `target_date`.
-    Meme limite qu'a l'entrainement : ne voit que les matchs PL de ce dataset, pas les matchs
-    de coupe/Europe."""
+    """Number of PL matches played by `team` in the `window_days` days before `target_date`.
+    Same limitation as at training time: only sees PL matches from this dataset, not
+    cup/European matches."""
     cutoff = target_date - pd.Timedelta(days=window_days)
     dates = match_dates.get(team, [])
     return sum(1 for d in dates if cutoff < d < target_date)
@@ -118,12 +127,12 @@ def compute_features(home: str, away: str, state: dict, match_date=None):
 
 
 # ---------------------------------------------------------------------------
-# Ajustements post-hoc (saisis à la main, le modèle ne les connaît pas)
+# Post-hoc adjustments (entered by hand, the model doesn't know about them)
 # ---------------------------------------------------------------------------
 
 def _apply_rest_days(p_home, p_draw, p_away, rest_days_diff):
-    """rest_days_diff : jours de repos domicile - jours de repos exterieur.
-    +2 = domicile a 2 jours de repos de plus, -2 = c'est l'exterieur qui est plus repose."""
+    """rest_days_diff: home rest days - away rest days.
+    +2 = home has 2 more rest days, -2 = the away team is more rested."""
     factor = float(np.tanh(rest_days_diff / 7.0) * REST_DAY_IMPACT)
     p_home = max(0.01, p_home + factor * 0.5 * (1 - p_home))
     p_away = max(0.01, p_away - factor * 0.5 * p_away)
@@ -143,9 +152,9 @@ def _apply_injuries(home, away, p_home, p_draw, p_away, injured_home, injured_aw
 
 
 def _apply_current_standings(p_home, p_draw, p_away, home_points, away_points):
-    """home_points/away_points : points au classement actuel (saison en cours). L'ecart de
-    points pousse la proba vers l'equipe la mieux classee - sature au dela de ~15 points
-    d'ecart (STANDINGS_POINTS_SCALE)."""
+    """home_points/away_points: points in the current standings (current season). The
+    points gap pushes the probability towards the higher-ranked team - saturates beyond
+    ~15 points of gap (STANDINGS_POINTS_SCALE)."""
     points_diff = home_points - away_points
     factor = float(np.tanh(points_diff / STANDINGS_POINTS_SCALE) * STANDINGS_IMPACT)
     p_home = max(0.01, p_home + factor * 0.5 * (1 - p_home))
@@ -155,33 +164,33 @@ def _apply_current_standings(p_home, p_draw, p_away, home_points, away_points):
 
 
 def _print_goal_markets(home, away, context, p_home, p_draw, p_away, n_scorelines=5):
-    """Affiche scores probables / BTTS / over-under, via le modele de buts Poisson de
-    src/models/markets.py -- INDEPENDANT du modele 1X2 principal (cf docstring de markets.py)."""
+    """Prints probable scores / BTTS / over-under, via the Poisson goal model from
+    src/models/markets.py -- INDEPENDENT of the main 1X2 model (see markets.py docstring)."""
     lambda_home, lambda_away = expected_goals(
         context["gs_home"], context["gc_home"], context["gs_away"], context["gc_away"]
     )
     matrix = goal_matrix(lambda_home, lambda_away)
 
-    print(f"\n  --- Marches derives (modele de buts Poisson, independant du modele 1X2 ci-dessus) ---")
-    print(f"  Buts attendus : {home} {lambda_home:.2f} - {lambda_away:.2f} {away}")
+    print(f"\n  --- Derived markets (Poisson goal model, independent of the 1X2 model above) ---")
+    print(f"  Expected goals: {home} {lambda_home:.2f} - {lambda_away:.2f} {away}")
 
     imp = implied_1x2(matrix)
-    print(f"  1X2 implicite par ce modele : Domicile {imp['home']*100:.1f}% / Nul {imp['draw']*100:.1f}% / "
-          f"Exterieur {imp['away']*100:.1f}% (a comparer, pas a confondre, avec le 1X2 ci-dessus)")
+    print(f"  1X2 implied by this model: Home {imp['home']*100:.1f}% / Draw {imp['draw']*100:.1f}% / "
+          f"Away {imp['away']*100:.1f}% (to compare, not confuse, with the 1X2 above)")
 
-    print(f"  Scores les plus probables :")
+    print(f"  Most probable scores:")
     for i, j, p in top_scorelines(matrix, n=n_scorelines):
         print(f"    {home} {i} - {j} {away}  ({p*100:.1f}%)")
 
     btts_probs = btts(matrix)
-    print(f"  BTTS (les 2 equipes marquent) : Oui {btts_probs['yes']*100:.1f}% / Non {btts_probs['no']*100:.1f}%")
+    print(f"  BTTS (both teams score) : Yes {btts_probs['yes']*100:.1f}% / No {btts_probs['no']*100:.1f}%")
 
     ou_probs = {}
     for line in OU_LINES:
         ou_probs[line] = over_under(matrix, line)
         print(f"  Over/Under {line} : Over {ou_probs[line]['over']*100:.1f}% / Under {ou_probs[line]['under']*100:.1f}%")
 
-    print(f"\n  Notes (informatif, pas un conseil financier) :")
+    print(f"\n  Notes (informational, not financial advice):")
     for note in betting_notes(p_home, p_draw, p_away, btts_probs, ou_probs):
         print(f"    - {note}")
 
@@ -201,14 +210,14 @@ def _apply_odds(p_home, p_draw, p_away, odds_1x2, blend=ODDS_BLEND_WEIGHT):
     return p_home / total, p_draw / total, p_away / total, implied
 
 
-# Enjeu du match : niveau categoriel -> bonus de motivation pour l'equipe concernee.
-# "derby" est separe (pas un niveau par equipe) : un derby ne favorise pas un camp, il rend
-# statistiquement le match plus ferme (plus de nuls / scores serres), donc gonfle p_draw.
+# Match stakes: categorical level -> motivation boost for the team in question.
+# "derby" is separate (not a per-team level): a derby doesn't favor either side, it
+# statistically makes the match tighter (more draws / narrow scorelines), so it boosts p_draw.
 STAKES_LEVELS = {
-    "neutre": 0.00,
-    "europe": 0.04,    # qualification Champions/Europa League en jeu
-    "maintien": 0.05,  # lutte pour le maintien : tres motivant (peur de la relegation)
-    "titre": 0.06,     # course au titre
+    "neutral": 0.00,
+    "europe": 0.04,    # Champions/Europa League qualification at stake
+    "survival": 0.05,  # relegation battle: very motivating (fear of relegation)
+    "title": 0.06,     # title race
 }
 DERBY_DRAW_BOOST = 0.05
 
@@ -232,7 +241,7 @@ def _apply_stakes(p_home, p_draw, p_away, stakes_home, stakes_away, derby):
 
 
 # ---------------------------------------------------------------------------
-# Prédiction
+# Prediction
 # ---------------------------------------------------------------------------
 
 def predict_match(home: str, away: str, model=None, scaler=None, state=None,
@@ -243,25 +252,25 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
                    odds_1x2=None, odds_blend=ODDS_BLEND_WEIGHT,
                    stakes_home: str = None, stakes_away: str = None, derby: bool = False,
                    match_date=None, show_markets: bool = True):
-    """Retourne {"home": p, "draw": p, "away": p} et affiche un résumé.
+    """Returns {"home": p, "draw": p, "away": p} and prints a summary.
 
-    Calculés automatiquement (aucune saisie) : elo, forme, forme domicile/exterieur, h2h,
-    buts, classement moyen 5 ans, enchainement de matchs (congestion_diff, sur match_date -
-    par defaut la date du jour ; ne compte que les matchs PL de ce dataset, pas les matchs
-    de coupe/Europe -- sous-estime la vraie fatigue d'une equipe engagee sur plusieurs
-    tableaux, complete avec rest_days_diff si tu connais mieux la situation reelle).
+    Computed automatically (no input needed): elo, form, home/away form, h2h, goals,
+    5-season average rank, fixture congestion (congestion_diff, on match_date - defaults
+    to today; only counts PL matches from this dataset, not cup/European matches --
+    underestimates the true fatigue of a team competing on multiple fronts, complement
+    with rest_days_diff if you know the real situation better).
 
-    À saisir toi-même (le modèle ne les connaît pas) :
-      - injured_home / injured_away : listes de noms de joueurs absents
-      - rest_days_diff : jours de repos domicile - exterieur (+2 = domicile plus repose)
-      - home_position/home_points, away_position/away_points : classement ACTUEL saison en
-        cours (absent du dataset historique tant que la saison n'est pas terminee)
-      - odds_1x2 : dict optionnel {"1": cote_domicile, "X": cote_nul, "2": cote_exterieur}
-      - stakes_home/stakes_away : "titre" / "europe" / "maintien" / "neutre" (defaut)
-      - derby : True/False -- gonfle la proba de nul (match ferme), ne favorise aucun camp
+    To enter yourself (the model doesn't know about these):
+      - injured_home / injured_away: lists of absent player names
+      - rest_days_diff: home rest days - away rest days (+2 = home more rested)
+      - home_position/home_points, away_position/away_points: CURRENT standings for the
+        ongoing season (absent from the historical dataset until the season is over)
+      - odds_1x2: optional dict {"1": home_odds, "X": draw_odds, "2": away_odds}
+      - stakes_home/stakes_away: "title" / "europe" / "survival" / "neutral" (default)
+      - derby: True/False -- boosts the draw probability (tight match), doesn't favor either side
 
-    show_markets (defaut True) : affiche en plus scores probables / BTTS / over-under via un
-    second modele (Poisson sur les buts, independant du 1X2 -- cf src/models/markets.py).
+    show_markets (default True): also shows probable scores / BTTS / over-under via a
+    second model (Poisson on goals, independent of the 1X2 -- see src/models/markets.py).
     """
     if state is None:
         _df, state = build_dataset_with_state()
@@ -274,7 +283,7 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
 
     for team in (home, away):
         if team not in state["elo"]:
-            print(f"! '{team}' absent du dataset (equipe jamais rencontree ou nom mal orthographie).")
+            print(f"! '{team}' not found in the dataset (team never seen, or name misspelled).")
 
     features, context = compute_features(home, away, state, match_date=match_date)
     x = np.array([[features[c] for c in FEATURE_COLUMNS]])
@@ -282,37 +291,37 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
     proba = dict(zip(model.classes_, model.predict_proba(x_scaled)[0]))
     p_away, p_draw, p_home = proba.get(0, 0.0), proba.get(1, 0.0), proba.get(2, 0.0)
 
-    print(f"\n{home} (domicile) vs {away} (exterieur)")
+    print(f"\n{home} (home) vs {away} (away)")
     print(f"  Elo  : {context['elo_home']:.0f} vs {context['elo_away']:.0f}")
-    print(f"  Rang moyen {N_SEASONS} dernieres saisons : {context['rank_home']:.1f} vs {context['rank_away']:.1f}")
-    print(f"  Enchainement ({CONGESTION_WINDOW_DAYS}j, matchs PL seulement) : "
+    print(f"  Average rank over last {N_SEASONS} seasons : {context['rank_home']:.1f} vs {context['rank_away']:.1f}")
+    print(f"  Fixture congestion ({CONGESTION_WINDOW_DAYS}d, PL matches only) : "
           f"{home} {context['congestion_home']} vs {away} {context['congestion_away']}")
-    print(f"  Modele seul -> Domicile {p_home*100:.1f}% / Nul {p_draw*100:.1f}% / Exterieur {p_away*100:.1f}%")
+    print(f"  Model only -> Home {p_home*100:.1f}% / Draw {p_draw*100:.1f}% / Away {p_away*100:.1f}%")
 
     if injured_home or injured_away:
         p_home, p_draw, p_away, inj_info = _apply_injuries(
             home, away, p_home, p_draw, p_away, injured_home, injured_away, squad_values
         )
-        print(f"  + Blessures : {home} manque {list(inj_info['home'])}, {away} manque {list(inj_info['away'])}")
+        print(f"  + Injuries : {home} missing {list(inj_info['home'])}, {away} missing {list(inj_info['away'])}")
 
     if rest_days_diff:
         p_home, p_draw, p_away, rest_factor = _apply_rest_days(p_home, p_draw, p_away, rest_days_diff)
-        print(f"  + Repos : {home} {'+' if rest_days_diff >= 0 else ''}{rest_days_diff}j vs {away} "
+        print(f"  + Rest : {home} {'+' if rest_days_diff >= 0 else ''}{rest_days_diff}d vs {away} "
               f"(impact {rest_factor*100:+.1f}%)")
 
     if home_points is not None and away_points is not None:
         p_home, p_draw, p_away, standings_factor = _apply_current_standings(p_home, p_draw, p_away, home_points, away_points)
-        pos_str = (f" ({home_position}e vs {away_position}e)" if home_position and away_position else "")
-        print(f"  + Classement actuel : {home_points}pts vs {away_points}pts{pos_str} (impact {standings_factor*100:+.1f}%)")
+        pos_str = (f" ({_ordinal(home_position)} vs {_ordinal(away_position)})" if home_position and away_position else "")
+        print(f"  + Current standings : {home_points}pts vs {away_points}pts{pos_str} (impact {standings_factor*100:+.1f}%)")
 
     if stakes_home or stakes_away or derby:
         p_home, p_draw, p_away = _apply_stakes(p_home, p_draw, p_away, stakes_home, stakes_away, derby)
         derby_str = " + derby" if derby else ""
-        print(f"  + Enjeu : {home}={stakes_home or 'neutre'} / {away}={stakes_away or 'neutre'}{derby_str}")
+        print(f"  + Stakes : {home}={stakes_home or 'neutral'} / {away}={stakes_away or 'neutral'}{derby_str}")
 
     if odds_1x2:
         p_home, p_draw, p_away, implied = _apply_odds(p_home, p_draw, p_away, odds_1x2, odds_blend)
-        print(f"  + Cotes marche (implicite) : {implied['1']*100:.1f}% / {implied['X']*100:.1f}% / {implied['2']*100:.1f}% "
+        print(f"  + Market odds (implied) : {implied['1']*100:.1f}% / {implied['X']*100:.1f}% / {implied['2']*100:.1f}% "
               f"(blend={odds_blend})")
 
     no_manual_input = not any([
@@ -321,8 +330,8 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
         stakes_home, stakes_away, derby, odds_1x2,
     ])
     if no_manual_input:
-        print("  (!) Aucun ajustement manuel fourni (blessures, repos, classement, enjeu, cotes)")
-        print("      -> prediction basee uniquement sur l'historique, pas sur le contexte du jour J")
+        print("  (!) No manual adjustment provided (injuries, rest, standings, stakes, odds)")
+        print("      -> prediction based on history only, not on the matchday context")
 
     print()
     print(f"  {RESULT_LABELS[2]} {home:<20} {p_home * 100:5.1f}%")
@@ -339,7 +348,7 @@ if __name__ == "__main__":
     if len(sys.argv) == 3:
         predict_match(sys.argv[1], sys.argv[2])
     else:
-        print('Usage: python -m src.models.predict "Equipe domicile" "Equipe exterieur"')
+        print('Usage: python -m src.models.predict "Home team" "Away team"')
         predict_match(
             "Man City", "Sunderland",
             injured_home=["Rodri"],

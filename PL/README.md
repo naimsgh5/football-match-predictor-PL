@@ -1,28 +1,28 @@
 # Football Match Predictor — Premier League
 
-Prédiction du résultat d'un match de Premier League (victoire domicile / nul / victoire extérieur), en comparant plusieurs approches : baseline Logistic Regression → MLP → LSTM/Transformer (PyTorch).
+Predicts the outcome of a Premier League match (home win / draw / away win), comparing several approaches: baseline Logistic Regression → MLP → LSTM/Transformer (PyTorch).
 
-Projet personnel de montée en compétences en deep learning, dans la continuité d'un premier projet en Logistic Regression One-vs-All + Elo ratings + Monte Carlo.
+Personal project to build up deep learning skills, following on from an earlier project using Logistic Regression One-vs-All + Elo ratings + Monte Carlo.
 
-> Commandes courantes (mise à jour des données, entraînement, prédiction) : voir [COMMANDS.md](COMMANDS.md).
-> **Toutes les commandes ci-dessous s'exécutent depuis ce dossier** (`cd PL` depuis la racine du repo).
+> Common commands (updating data, training, prediction): see [COMMANDS.md](COMMANDS.md).
+> **All commands below run from this folder** (`cd PL` from the repo root).
 
 ## Structure
 
 ```
 data/
-  raw/         # données brutes, jamais modifiées
-  interim/     # données nettoyées (régénérable, non versionné)
-  processed/   # features finales prêtes pour l'entraînement (régénérable, non versionné)
-notebooks/     # exploration (EDA, comparaison de modèles)
+  raw/         # raw data, never modified
+  interim/     # cleaned data (rebuildable, not versioned)
+  processed/   # final training-ready features (rebuildable, not versioned)
+notebooks/     # exploration (EDA, model comparison)
 src/
-  data/        # collecte et nettoyage
-  features/    # Elo, forme, head-to-head, classement, blessures
+  data/        # collection and cleaning
+  features/    # Elo, form, head-to-head, standings, injuries
   models/      # baseline, MLP, LSTM/Transformer
-  evaluation/  # métriques, calibration
-tests/         # tests unitaires (notamment anti-data-leakage)
-configs/       # hyperparamètres par expérience
-models_saved/  # checkpoints (non versionné)
+  evaluation/  # metrics, calibration
+tests/         # unit tests (notably anti-data-leakage)
+configs/       # per-experiment hyperparameters
+models_saved/  # checkpoints (not versioned)
 ```
 
 ## Setup
@@ -31,48 +31,48 @@ models_saved/  # checkpoints (non versionné)
 pip install -r requirements.txt
 ```
 
-> Environnement local : `C:` étant saturé (peu d'espace libre), l'environnement conda du
-> projet vit sur `E:\conda_envs\football-dl` plutôt que dans l'install Anaconda par défaut.
-> `python -m ...` depuis ce README suppose `E:\conda_envs\football-dl\python.exe` sur le PATH
-> (ou à appeler explicitement).
+> Local environment: since `C:` is nearly full (very little free space), the project's
+> conda environment lives on `E:\conda_envs\football-dl` instead of the default Anaconda
+> install. `python -m ...` commands in this README assume
+> `E:\conda_envs\football-dl\python.exe` is on PATH (or called explicitly).
 
 ## Milestones
 
-- [x] **M0 — Setup du repo**
-  - Structure de dossiers (`data/`, `src/`, `notebooks/`, `tests/`, `configs/`)
+- [x] **M0 — Repo setup**
+  - Folder structure (`data/`, `src/`, `notebooks/`, `tests/`, `configs/`)
   - `.gitignore`, `requirements.txt`, README
 
-- [x] **M1 — Données brutes Premier League**
-  - `data/raw/premier_league_results.csv` : 1900 matchs, 5 saisons complètes (2021/22 → 2025/26, 380 matchs chacune)
-  - Saison 2025/26 complétée via `data/raw/E0_2025_26_footballdata.csv` (football-data.co.uk) : 21 matchs manquants ajoutés, 0 divergence de score sur les matchs déjà présents
-  - Validation dans `notebooks/predictor.ipynb` : 0 valeur manquante, noms d'équipes cohérents domicile/extérieur
+- [x] **M1 — Raw Premier League data**
+  - `data/raw/premier_league_results.csv`: 1900 matches, 5 full seasons (2021/22 → 2025/26, 380 matches each)
+  - 2025/26 season completed via `data/raw/E0_2025_26_footballdata.csv` (football-data.co.uk): 21 missing matches added, 0 score discrepancies on matches already present
+  - Validated in `notebooks/predictor.ipynb`: 0 missing values, home/away team names consistent
 
 - [x] **M2 — Feature engineering**
-  - Modules dans `src/features/` : Elo pré-match, forme glissante (10 derniers matchs), buts marqués/encaissés glissants, head-to-head, classement moyen des 5 dernières saisons complètes
-  - Utilitaire blessures/valeur marchande (`market_value_injuries.py`) — réservé à l'inférence sur un match à venir, pas utilisable comme feature d'entraînement (pas d'historique de blessures disponible)
-  - Tests anti-fuite temporelle (`tests/test_features.py`) : 2 bugs de fuite détectés et corrigés (tri de date non stable, moyenne de buts de repli calculée sur le dataset entier au lieu de l'historique déjà connu)
-  - Dataset final : `data/processed/premier_league_features.parquet`, 1900 matchs × 8 features (`elo_diff`, `form_diff`, `venue_form_diff`, `h2h_home_win_rate`, `attack_diff`, `defense_diff`, `rank_diff`, `congestion_diff`)
-  - `venue_form_diff` : forme calculée séparément à domicile / à l'extérieur (ajoutée après coup, cf M3)
-  - `congestion_diff` (ajoutée après coup, cf M4) : proxy d'enchaînement de matchs / risque de rotation du 11 de départ — nombre de matchs joués par chaque équipe dans les 10 jours précédents. Limite connue : ne compte que les matchs PL de ce dataset, pas les matchs de coupe/Europe (source absente) — sous-estime la vraie fatigue d'une équipe engagée sur plusieurs tableaux. Non nulle sur 13.8% des matchs (période des fêtes, journées en semaine)
+  - Modules in `src/features/`: pre-match Elo, rolling form (last 10 matches), rolling goals scored/conceded, head-to-head, average rank over the last 5 completed seasons
+  - Injuries/market value utility (`market_value_injuries.py`) — reserved for inference on an upcoming match, not usable as a training feature (no injury history available)
+  - Anti-lookahead-leakage tests (`tests/test_features.py`): 2 leakage bugs found and fixed (unstable date sort, fallback goals average computed on the whole dataset instead of the history known so far)
+  - Final dataset: `data/processed/premier_league_features.parquet`, 1900 matches × 8 features (`elo_diff`, `form_diff`, `venue_form_diff`, `h2h_home_win_rate`, `attack_diff`, `defense_diff`, `rank_diff`, `congestion_diff`)
+  - `venue_form_diff`: form computed separately for home / away (added later, see M3)
+  - `congestion_diff` (added later, see M4): proxy for fixture congestion / squad-rotation risk — number of matches each team played in the preceding 10 days. Known limitation: only counts PL matches from this dataset, not cup/European matches (source not available) — underestimates the true fatigue of a team competing on multiple fronts. Non-zero on 13.8% of matches (festive period, midweek rounds)
 
 - [x] **M3 — Baseline Logistic Regression**
-  - `src/models/baseline_lr.py` : sklearn `LogisticRegression` multinomiale, features standardisées (`StandardScaler`)
-  - Split temporel strict : train = saisons 2021-2023 (1140 matchs), validation = saison 2024, test = saison 2025 (jamais de shuffle aléatoire)
-  - Résultats : accuracy 51.6% (val) / 48.2% (test), contre 40.8% / 42.6% pour la baseline naïve ("toujours domicile")
-  - Limite connue : le modèle prédit quasiment jamais le nul (classe la plus difficile à séparer) — à surveiller sur les modèles suivants
-  - `src/evaluation/metrics.py` : fonctions d'évaluation réutilisées pour M4/M5 (accuracy, log-loss, matrice de confusion)
-  - `src/models/predict.py` : prédiction d'un match précis à venir (`python -m src.models.predict "Arsenal" "Chelsea"`), recalcule les features automatiques à partir de l'état final de l'historique ; ajustements optionnels post-hoc, saisis à la main (jamais appris par le modèle) : blessures/valeur marchande (`src/features/squad_values.py`), jours de repos, classement/points actuels (saison en cours, absente du dataset), enjeu du match (titre/europe/maintien/derby), cotes bookmaker (moyenne marché, marge retirée)
-  - Réentraîné après l'ajout de `venue_form_diff` : accuracy 52.1%/47.9% (quasi identique, `venue_form_diff` a peu d'importance pour un modèle linéaire — à surveiller sur MLP/LSTM)
-  - `src/features/squad_values.py` : valeurs marchandes rafraîchies depuis transfermarkt.co.uk (effectifs complets, 20 clubs)
-  - `src/models/markets.py` : scores exacts probables / BTTS / over-under, via un **second modèle** (Poisson sur les buts attendus, indépendant du classifieur 1X2) — le 1X2 n'a par construction que 3 classes, il ne peut pas donner de score ; affiché automatiquement par `predict_match()` (`show_markets=True` par défaut). Le 1X2 implicite de ce modèle de buts est affiché à côté de celui du modèle principal pour comparaison, sans être forcé à correspondre — deux estimations indépendantes. `tests/test_markets.py` : cohérence des distributions de probabilité (somment à 1)
-  - `test_predict.py` (racine) : bac à sable prêt à l'emploi pour tester des prédictions à la main
+  - `src/models/baseline_lr.py`: sklearn multinomial `LogisticRegression`, standardized features (`StandardScaler`)
+  - Strict temporal split: train = 2021-2023 seasons (1140 matches), validation = 2024 season, test = 2025 season (never random shuffle)
+  - Results: accuracy 51.6% (val) / 48.2% (test), vs 40.8% / 42.6% for the naive baseline ("always home")
+  - Known limitation: the model almost never predicts a draw (the hardest class to separate) — worth watching on later models
+  - `src/evaluation/metrics.py`: evaluation functions reused for M4/M5 (accuracy, log-loss, confusion matrix)
+  - `src/models/predict.py`: predicts a specific upcoming match (`python -m src.models.predict "Arsenal" "Chelsea"`), recomputes automatic features from the final state of the history; optional post-hoc adjustments, entered by hand (never learned by the model): injuries/market value (`src/features/squad_values.py`), rest days, current standings/points (current season, absent from the dataset), match stakes (title/europe/relegation/derby), bookmaker odds (market average, margin removed)
+  - Retrained after adding `venue_form_diff`: accuracy 52.1%/47.9% (nearly identical — `venue_form_diff` has little importance for a linear model, worth watching on MLP/LSTM)
+  - `src/features/squad_values.py`: market values refreshed from transfermarkt.co.uk (full squads, 20 clubs)
+  - `src/models/markets.py`: probable exact scores / BTTS / over-under, via a **second model** (Poisson on expected goals, independent of the 1X2 classifier) — the 1X2 model only has 3 classes by construction, it can't give a score; shown automatically by `predict_match()` (`show_markets=True` by default). This goal model's implied 1X2 is shown next to the main model's for comparison, without being forced to match — two independent estimates. `tests/test_markets.py`: probability distribution consistency (sum to 1)
+  - `test_predict.py` (root): ready-to-use sandbox for testing predictions by hand
 
 - [x] **M4 — MLP (PyTorch)**
-  - `src/models/mlp.py` : réseau dense simple (2 couches cachées 32/16, dropout 0.3, Adam), mêmes features/split que M3
-  - Entraînement full-batch (train tient en un seul batch vu la petite taille) avec early stopping sur le log-loss de validation
-  - Résultats : accuracy 53.4% (val) / 49.5% (test), log-loss 0.982 / 1.033 — légère amélioration sur toute la ligne par rapport à la baseline LR (52.1% / 47.9%, log-loss 0.996 / 1.040)
-  - Même limite que M3 : le nul reste ignoré (0% recall) sur les deux modèles — signal faible dans les features actuelles plutôt que limite de capacité du modèle
-  - Réentraîné après l'ajout de `congestion_diff` : LR 51.6%/47.6%, MLP 51.6%/47.6% (léger recul, bruit probable vu la taille du dataset) — coefficient LR modeste (0.042, 6e sur 8) mais non négligeable, feature conservée pour M5 et calculée automatiquement dans `predict.py` (`match_date`, défaut = aujourd'hui)
+  - `src/models/mlp.py`: simple dense network (2 hidden layers 32/16, dropout 0.3, Adam), same features/split as M3
+  - Full-batch training (the train set fits in a single batch given its small size) with early stopping on validation log-loss
+  - Results: accuracy 53.4% (val) / 49.5% (test), log-loss 0.982 / 1.033 — slight improvement across the board over the LR baseline (52.1% / 47.9%, log-loss 0.996 / 1.040)
+  - Same limitation as M3: draws are still ignored (0% recall) on both models — weak signal in the current features rather than a model-capacity limit
+  - Retrained after adding `congestion_diff`: LR 51.6%/47.6%, MLP 51.6%/47.6% (slight dip, likely noise given the dataset size) — modest LR coefficient (0.042, 6th of 8) but not negligible, feature kept for M5 and computed automatically in `predict.py` (`match_date`, defaults to today)
 
 - [ ] M5 — LSTM/Transformer (PyTorch)
-- [ ] M6 — Évaluation finale et comparaison des modèles
+- [ ] M6 — Final evaluation and model comparison
