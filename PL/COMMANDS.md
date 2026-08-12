@@ -1,8 +1,13 @@
 # Commandes utiles
 
-Aide-mémoire des commandes courantes du projet. Tout se lance depuis la racine
-(`e:\PROJET DL`), avec l'interpréteur Python de l'environnement conda sur `E:`
-(le disque `C:` est saturé, voir README) :
+Aide-mémoire des commandes courantes du projet Premier League. **Tout se lance depuis ce
+dossier** (`e:\PROJET DL\PL`, pas la racine du repo qui contient plusieurs championnats) :
+
+```powershell
+cd "e:\PROJET DL\PL"
+```
+
+Avec l'interpréteur Python de l'environnement conda sur `E:` (le disque `C:` est saturé, voir README) :
 
 ```
 E:\conda_envs\football-dl\python.exe

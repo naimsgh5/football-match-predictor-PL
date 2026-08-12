@@ -1,77 +1,28 @@
 # Football Match Predictor (Deep Learning)
 
-Prédiction du résultat d'un match de Premier League (victoire domicile / nul / victoire extérieur), en comparant plusieurs approches : baseline Logistic Regression → MLP → LSTM/Transformer (PyTorch).
+Prédiction de résultats de matchs de football via plusieurs approches de deep learning
+(Logistic Regression → MLP → LSTM/Transformer), organisée **par compétition** — chaque
+championnat a son propre pipeline (données, features, modèles), pour rester comparable en
+interne (voir la discussion dans `PL/README.md` sur pourquoi mélanger des championnats
+différents dans un même Elo/classement n'a pas de sens sans recalibration).
 
-Projet personnel de montée en compétences en deep learning, dans la continuité d'un premier projet en Logistic Regression One-vs-All + Elo ratings + Monte Carlo.
+## Compétitions
 
-> Commandes courantes (mise à jour des données, entraînement, prédiction) : voir [COMMANDS.md](COMMANDS.md).
+- **[PL/](PL/)** — Premier League. La seule active pour l'instant ; voir
+  [PL/README.md](PL/README.md) pour le détail des milestones, et [PL/COMMANDS.md](PL/COMMANDS.md)
+  pour les commandes courantes (mise à jour des données, entraînement, prédiction).
+- D'autres championnats (LaLiga, Bundesliga, Ligue 1, Serie A) et un module **LDC**
+  (Ligue des Champions, qui assemblera des infos venant de plusieurs championnats -- forme,
+  fatigue, blessures directement réutilisables, mais Elo/classement à recalibrer entre
+  championnats, ex. via les coefficients UEFA) sont prévus mais pas encore commencés.
 
-## Structure
+## Structure du repo
 
 ```
-data/
-  raw/         # données brutes, jamais modifiées
-  interim/     # données nettoyées (régénérable, non versionné)
-  processed/   # features finales prêtes pour l'entraînement (régénérable, non versionné)
-notebooks/     # exploration (EDA, comparaison de modèles)
-src/
-  data/        # collecte et nettoyage
-  features/    # Elo, forme, head-to-head, classement, blessures
-  models/      # baseline, MLP, LSTM/Transformer
-  evaluation/  # métriques, calibration
-tests/         # tests unitaires (notamment anti-data-leakage)
-configs/       # hyperparamètres par expérience
-models_saved/  # checkpoints (non versionné)
+PL/            # Premier League -- pipeline complet (voir PL/README.md)
+algo/          # ancien projet (reference locale, hors repo -- gitignore)
 ```
 
-## Setup
-
-```bash
-pip install -r requirements.txt
-```
-
-> Environnement local : `C:` étant saturé (peu d'espace libre), l'environnement conda du
-> projet vit sur `E:\conda_envs\football-dl` plutôt que dans l'install Anaconda par défaut.
-> `python -m ...` depuis ce README suppose `E:\conda_envs\football-dl\python.exe` sur le PATH
-> (ou à appeler explicitement).
-
-## Milestones
-
-- [x] **M0 — Setup du repo**
-  - Structure de dossiers (`data/`, `src/`, `notebooks/`, `tests/`, `configs/`)
-  - `.gitignore`, `requirements.txt`, README
-
-- [x] **M1 — Données brutes Premier League**
-  - `data/raw/premier_league_results.csv` : 1900 matchs, 5 saisons complètes (2021/22 → 2025/26, 380 matchs chacune)
-  - Saison 2025/26 complétée via `data/raw/E0_2025_26_footballdata.csv` (football-data.co.uk) : 21 matchs manquants ajoutés, 0 divergence de score sur les matchs déjà présents
-  - Validation dans `notebooks/predictor.ipynb` : 0 valeur manquante, noms d'équipes cohérents domicile/extérieur
-
-- [x] **M2 — Feature engineering**
-  - Modules dans `src/features/` : Elo pré-match, forme glissante (10 derniers matchs), buts marqués/encaissés glissants, head-to-head, classement moyen des 5 dernières saisons complètes
-  - Utilitaire blessures/valeur marchande (`market_value_injuries.py`) — réservé à l'inférence sur un match à venir, pas utilisable comme feature d'entraînement (pas d'historique de blessures disponible)
-  - Tests anti-fuite temporelle (`tests/test_features.py`) : 2 bugs de fuite détectés et corrigés (tri de date non stable, moyenne de buts de repli calculée sur le dataset entier au lieu de l'historique déjà connu)
-  - Dataset final : `data/processed/premier_league_features.parquet`, 1900 matchs × 8 features (`elo_diff`, `form_diff`, `venue_form_diff`, `h2h_home_win_rate`, `attack_diff`, `defense_diff`, `rank_diff`, `congestion_diff`)
-  - `venue_form_diff` : forme calculée séparément à domicile / à l'extérieur (ajoutée après coup, cf M3)
-  - `congestion_diff` (ajoutée après coup, cf M4) : proxy d'enchaînement de matchs / risque de rotation du 11 de départ — nombre de matchs joués par chaque équipe dans les 10 jours précédents. Limite connue : ne compte que les matchs PL de ce dataset, pas les matchs de coupe/Europe (source absente) — sous-estime la vraie fatigue d'une équipe engagée sur plusieurs tableaux. Non nulle sur 13.8% des matchs (période des fêtes, journées en semaine)
-
-- [x] **M3 — Baseline Logistic Regression**
-  - `src/models/baseline_lr.py` : sklearn `LogisticRegression` multinomiale, features standardisées (`StandardScaler`)
-  - Split temporel strict : train = saisons 2021-2023 (1140 matchs), validation = saison 2024, test = saison 2025 (jamais de shuffle aléatoire)
-  - Résultats : accuracy 51.6% (val) / 48.2% (test), contre 40.8% / 42.6% pour la baseline naïve ("toujours domicile")
-  - Limite connue : le modèle prédit quasiment jamais le nul (classe la plus difficile à séparer) — à surveiller sur les modèles suivants
-  - `src/evaluation/metrics.py` : fonctions d'évaluation réutilisées pour M4/M5 (accuracy, log-loss, matrice de confusion)
-  - `src/models/predict.py` : prédiction d'un match précis à venir (`python -m src.models.predict "Arsenal" "Chelsea"`), recalcule les features automatiques à partir de l'état final de l'historique ; ajustements optionnels post-hoc, saisis à la main (jamais appris par le modèle) : blessures/valeur marchande (`src/features/squad_values.py`), jours de repos, classement/points actuels (saison en cours, absente du dataset), enjeu du match (titre/europe/maintien/derby), cotes bookmaker (moyenne marché, marge retirée)
-  - Réentraîné après l'ajout de `venue_form_diff` : accuracy 52.1%/47.9% (quasi identique, `venue_form_diff` a peu d'importance pour un modèle linéaire — à surveiller sur MLP/LSTM)
-  - `src/features/squad_values.py` : valeurs marchandes rafraîchies depuis transfermarkt.co.uk (effectifs complets, 20 clubs)
-  - `src/models/markets.py` : scores exacts probables / BTTS / over-under, via un **second modèle** (Poisson sur les buts attendus, indépendant du classifieur 1X2) — le 1X2 n'a par construction que 3 classes, il ne peut pas donner de score ; affiché automatiquement par `predict_match()` (`show_markets=True` par défaut). Le 1X2 implicite de ce modèle de buts est affiché à côté de celui du modèle principal pour comparaison, sans être forcé à correspondre — deux estimations indépendantes. `tests/test_markets.py` : cohérence des distributions de probabilité (somment à 1)
-  - `test_predict.py` (racine) : bac à sable prêt à l'emploi pour tester des prédictions à la main
-
-- [x] **M4 — MLP (PyTorch)**
-  - `src/models/mlp.py` : réseau dense simple (2 couches cachées 32/16, dropout 0.3, Adam), mêmes features/split que M3
-  - Entraînement full-batch (train tient en un seul batch vu la petite taille) avec early stopping sur le log-loss de validation
-  - Résultats : accuracy 53.4% (val) / 49.5% (test), log-loss 0.982 / 1.033 — légère amélioration sur toute la ligne par rapport à la baseline LR (52.1% / 47.9%, log-loss 0.996 / 1.040)
-  - Même limite que M3 : le nul reste ignoré (0% recall) sur les deux modèles — signal faible dans les features actuelles plutôt que limite de capacité du modèle
-  - Réentraîné après l'ajout de `congestion_diff` : LR 51.6%/47.6%, MLP 51.6%/47.6% (léger recul, bruit probable vu la taille du dataset) — coefficient LR modeste (0.042, 6e sur 8) mais non négligeable, feature conservée pour M5 et calculée automatiquement dans `predict.py` (`match_date`, défaut = aujourd'hui)
-
-- [ ] M5 — LSTM/Transformer (PyTorch)
-- [ ] M6 — Évaluation finale et comparaison des modèles
+Chaque dossier de compétition est censé rester autonome (ses propres `data/`, `src/`,
+`tests/`, `models_saved/`) mais partager le même code générique dès que possible plutôt que
+de le dupliquer -- à organiser en `src/` commun si/quand un deuxième championnat démarre.
