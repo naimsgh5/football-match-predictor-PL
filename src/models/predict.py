@@ -22,6 +22,7 @@ from src.features.historical_rank import N_SEASONS, average_rank
 from src.features.market_value_injuries import injury_strength
 from src.features.rolling_stats import CONGESTION_WINDOW_DAYS, WINDOW as FORM_WINDOW
 from src.features.squad_values import SQUAD_VALUES
+from src.models.markets import OU_LINES, betting_notes, btts, expected_goals, goal_matrix, implied_1x2, over_under, top_scorelines
 
 MODEL_PATH = "models_saved/baseline_lr.joblib"
 SCALER_PATH = "models_saved/baseline_lr_scaler.joblib"
@@ -111,6 +112,7 @@ def compute_features(home: str, away: str, state: dict, match_date=None):
         "elo_home": elo_home, "elo_away": elo_away,
         "rank_home": rank_home, "rank_away": rank_away,
         "congestion_home": congestion_home, "congestion_away": congestion_away,
+        "gs_home": gs_home, "gc_home": gc_home, "gs_away": gs_away, "gc_away": gc_away,
     }
     return features, context
 
@@ -150,6 +152,38 @@ def _apply_current_standings(p_home, p_draw, p_away, home_points, away_points):
     p_away = max(0.01, p_away - factor * 0.5 * p_away)
     total = p_home + p_draw + p_away
     return p_home / total, p_draw / total, p_away / total, factor
+
+
+def _print_goal_markets(home, away, context, p_home, p_draw, p_away, n_scorelines=5):
+    """Affiche scores probables / BTTS / over-under, via le modele de buts Poisson de
+    src/models/markets.py -- INDEPENDANT du modele 1X2 principal (cf docstring de markets.py)."""
+    lambda_home, lambda_away = expected_goals(
+        context["gs_home"], context["gc_home"], context["gs_away"], context["gc_away"]
+    )
+    matrix = goal_matrix(lambda_home, lambda_away)
+
+    print(f"\n  --- Marches derives (modele de buts Poisson, independant du modele 1X2 ci-dessus) ---")
+    print(f"  Buts attendus : {home} {lambda_home:.2f} - {lambda_away:.2f} {away}")
+
+    imp = implied_1x2(matrix)
+    print(f"  1X2 implicite par ce modele : Domicile {imp['home']*100:.1f}% / Nul {imp['draw']*100:.1f}% / "
+          f"Exterieur {imp['away']*100:.1f}% (a comparer, pas a confondre, avec le 1X2 ci-dessus)")
+
+    print(f"  Scores les plus probables :")
+    for i, j, p in top_scorelines(matrix, n=n_scorelines):
+        print(f"    {home} {i} - {j} {away}  ({p*100:.1f}%)")
+
+    btts_probs = btts(matrix)
+    print(f"  BTTS (les 2 equipes marquent) : Oui {btts_probs['yes']*100:.1f}% / Non {btts_probs['no']*100:.1f}%")
+
+    ou_probs = {}
+    for line in OU_LINES:
+        ou_probs[line] = over_under(matrix, line)
+        print(f"  Over/Under {line} : Over {ou_probs[line]['over']*100:.1f}% / Under {ou_probs[line]['under']*100:.1f}%")
+
+    print(f"\n  Notes (informatif, pas un conseil financier) :")
+    for note in betting_notes(p_home, p_draw, p_away, btts_probs, ou_probs):
+        print(f"    - {note}")
 
 
 def _remove_margin(odds_1x2: dict) -> dict:
@@ -208,7 +242,7 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
                    away_position: int = None, away_points: int = None,
                    odds_1x2=None, odds_blend=ODDS_BLEND_WEIGHT,
                    stakes_home: str = None, stakes_away: str = None, derby: bool = False,
-                   match_date=None):
+                   match_date=None, show_markets: bool = True):
     """Retourne {"home": p, "draw": p, "away": p} et affiche un résumé.
 
     Calculés automatiquement (aucune saisie) : elo, forme, forme domicile/exterieur, h2h,
@@ -225,6 +259,9 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
       - odds_1x2 : dict optionnel {"1": cote_domicile, "X": cote_nul, "2": cote_exterieur}
       - stakes_home/stakes_away : "titre" / "europe" / "maintien" / "neutre" (defaut)
       - derby : True/False -- gonfle la proba de nul (match ferme), ne favorise aucun camp
+
+    show_markets (defaut True) : affiche en plus scores probables / BTTS / over-under via un
+    second modele (Poisson sur les buts, independant du 1X2 -- cf src/models/markets.py).
     """
     if state is None:
         _df, state = build_dataset_with_state()
@@ -291,6 +328,9 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
     print(f"  {RESULT_LABELS[2]} {home:<20} {p_home * 100:5.1f}%")
     print(f"  {RESULT_LABELS[1]:<28} {p_draw * 100:5.1f}%")
     print(f"  {RESULT_LABELS[0]} {away:<20} {p_away * 100:5.1f}%")
+
+    if show_markets:
+        _print_goal_markets(home, away, context, p_home, p_draw, p_away)
 
     return {"home": p_home, "draw": p_draw, "away": p_away}
 

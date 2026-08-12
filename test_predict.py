@@ -13,15 +13,15 @@ predict_match("Man City", "Sunderland")
 
 # --- Exemple 2 : avec ajustements manuels -------------------------------------------------
 predict_match(
-    "Man City", "Sunderland",
+    "Man City", "Man United",
     injured_home=["Rodri"],
-    injured_away=[],
-    rest_days_diff=2,
+    injured_away=["Rashford"],
+    rest_days_diff=0,
     home_position=1, home_points=68,
-    away_position=17, away_points=31,
+    away_position=5, away_points=60,
     stakes_home="titre",
-    stakes_away="maintien",
-    derby=False,
-    odds_1x2={"1": 1.25, "X": 6.5, "2": 11.0},
+    stakes_away="titre",
+    derby=True,
+    odds_1x2={"1": 1.90, "X": 3.2, "2":3.5},
     match_date="2026-01-02",
 )

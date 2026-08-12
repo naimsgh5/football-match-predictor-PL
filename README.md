@@ -61,6 +61,8 @@ pip install -r requirements.txt
   - `src/models/predict.py` : prédiction d'un match précis à venir (`python -m src.models.predict "Arsenal" "Chelsea"`), recalcule les features automatiques à partir de l'état final de l'historique ; ajustements optionnels post-hoc, saisis à la main (jamais appris par le modèle) : blessures/valeur marchande (`src/features/squad_values.py`), jours de repos, classement/points actuels (saison en cours, absente du dataset), enjeu du match (titre/europe/maintien/derby), cotes bookmaker (moyenne marché, marge retirée)
   - Réentraîné après l'ajout de `venue_form_diff` : accuracy 52.1%/47.9% (quasi identique, `venue_form_diff` a peu d'importance pour un modèle linéaire — à surveiller sur MLP/LSTM)
   - `src/features/squad_values.py` : valeurs marchandes rafraîchies depuis transfermarkt.co.uk (effectifs complets, 20 clubs)
+  - `src/models/markets.py` : scores exacts probables / BTTS / over-under, via un **second modèle** (Poisson sur les buts attendus, indépendant du classifieur 1X2) — le 1X2 n'a par construction que 3 classes, il ne peut pas donner de score ; affiché automatiquement par `predict_match()` (`show_markets=True` par défaut). Le 1X2 implicite de ce modèle de buts est affiché à côté de celui du modèle principal pour comparaison, sans être forcé à correspondre — deux estimations indépendantes. `tests/test_markets.py` : cohérence des distributions de probabilité (somment à 1)
+  - `test_predict.py` (racine) : bac à sable prêt à l'emploi pour tester des prédictions à la main
 
 - [x] **M4 — MLP (PyTorch)**
   - `src/models/mlp.py` : réseau dense simple (2 couches cachées 32/16, dropout 0.3, Adam), mêmes features/split que M3
