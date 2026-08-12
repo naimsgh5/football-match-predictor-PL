@@ -4,6 +4,8 @@ Prédiction du résultat d'un match de Premier League (victoire domicile / nul /
 
 Projet personnel de montée en compétences en deep learning, dans la continuité d'un premier projet en Logistic Regression One-vs-All + Elo ratings + Monte Carlo.
 
+> Commandes courantes (mise à jour des données, entraînement, prédiction) : voir [COMMANDS.md](COMMANDS.md).
+
 ## Structure
 
 ```
