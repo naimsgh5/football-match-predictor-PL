@@ -1,10 +1,13 @@
-"""Predicts an upcoming match (never seen during training) with the already-trained model.
+"""Predicts an upcoming match (never seen during training) with the two trained models
+(Logistic Regression M3, MLP M4), shown separately so it's always clear which model
+produced which numbers.
 
 Recomputes the "core" features (Elo, form, home/away form, h2h, goals, 5-season rank)
 from the final state of the full history, then applies optional *post-hoc* adjustments
-(the model never learned from these, they only shift the final probability, as in
+(neither model ever learned from these, they only shift the final probability, as in
 algo/CLUBS_LOGISTIC_REGRESSION.ipynb): injuries/market value, rest days, current
-standings/points, bookmaker odds.
+standings/points, bookmaker odds. The same adjustments are applied independently to
+each model's raw prediction.
 
 Usage:
     python -m src.models.predict "Arsenal" "Chelsea"
@@ -14,6 +17,7 @@ import sys
 import joblib
 import numpy as np
 import pandas as pd
+import torch
 
 from src.evaluation.metrics import RESULT_LABELS
 from src.features.build_dataset import FEATURE_COLUMNS, build_dataset_with_state
@@ -22,10 +26,14 @@ from src.features.historical_rank import N_SEASONS, average_rank
 from src.features.market_value_injuries import injury_strength
 from src.features.rolling_stats import CONGESTION_WINDOW_DAYS, WINDOW as FORM_WINDOW
 from src.features.squad_values import SQUAD_VALUES
-from src.models.markets import OU_LINES, betting_notes, btts, expected_goals, goal_matrix, implied_1x2, over_under, top_scorelines
+from src.models.markets import OU_LINES, btts, expected_goals, goal_matrix, implied_1x2, over_under, top_scorelines
+from src.models.mlp import MLP
+from src.models.mlp import MODEL_PATH as MLP_MODEL_PATH
+from src.models.mlp import SCALER_PATH as MLP_SCALER_PATH
+from src.models.mlp import predict_proba as mlp_predict_proba
 
-MODEL_PATH = "models_saved/baseline_lr.joblib"
-SCALER_PATH = "models_saved/baseline_lr_scaler.joblib"
+LR_MODEL_PATH = "models_saved/baseline_lr.joblib"
+LR_SCALER_PATH = "models_saved/baseline_lr_scaler.joblib"
 DEFAULT_GOALS_AVG = 1.3
 REST_DAY_IMPACT = 0.12       # maximum (asymptotic) impact of rest days on the probabilities
 INJURY_IMPACT = 0.15         # maximum impact of the injury factor on the probabilities
@@ -127,7 +135,7 @@ def compute_features(home: str, away: str, state: dict, match_date=None):
 
 
 # ---------------------------------------------------------------------------
-# Post-hoc adjustments (entered by hand, the model doesn't know about them)
+# Post-hoc adjustments (entered by hand, neither model knows about them)
 # ---------------------------------------------------------------------------
 
 def _apply_rest_days(p_home, p_draw, p_away, rest_days_diff):
@@ -161,38 +169,6 @@ def _apply_current_standings(p_home, p_draw, p_away, home_points, away_points):
     p_away = max(0.01, p_away - factor * 0.5 * p_away)
     total = p_home + p_draw + p_away
     return p_home / total, p_draw / total, p_away / total, factor
-
-
-def _print_goal_markets(home, away, context, p_home, p_draw, p_away, n_scorelines=5):
-    """Prints probable scores / BTTS / over-under, via the Poisson goal model from
-    src/models/markets.py -- INDEPENDENT of the main 1X2 model (see markets.py docstring)."""
-    lambda_home, lambda_away = expected_goals(
-        context["gs_home"], context["gc_home"], context["gs_away"], context["gc_away"]
-    )
-    matrix = goal_matrix(lambda_home, lambda_away)
-
-    print(f"\n  --- Derived markets (Poisson goal model, independent of the 1X2 model above) ---")
-    print(f"  Expected goals: {home} {lambda_home:.2f} - {lambda_away:.2f} {away}")
-
-    imp = implied_1x2(matrix)
-    print(f"  1X2 implied by this model: Home {imp['home']*100:.1f}% / Draw {imp['draw']*100:.1f}% / "
-          f"Away {imp['away']*100:.1f}% (to compare, not confuse, with the 1X2 above)")
-
-    print(f"  Most probable scores:")
-    for i, j, p in top_scorelines(matrix, n=n_scorelines):
-        print(f"    {home} {i} - {j} {away}  ({p*100:.1f}%)")
-
-    btts_probs = btts(matrix)
-    print(f"  BTTS (both teams score) : Yes {btts_probs['yes']*100:.1f}% / No {btts_probs['no']*100:.1f}%")
-
-    ou_probs = {}
-    for line in OU_LINES:
-        ou_probs[line] = over_under(matrix, line)
-        print(f"  Over/Under {line} : Over {ou_probs[line]['over']*100:.1f}% / Under {ou_probs[line]['under']*100:.1f}%")
-
-    print(f"\n  Notes (informational, not financial advice):")
-    for note in betting_notes(p_home, p_draw, p_away, btts_probs, ou_probs):
-        print(f"    - {note}")
 
 
 def _remove_margin(odds_1x2: dict) -> dict:
@@ -240,19 +216,104 @@ def _apply_stakes(p_home, p_draw, p_away, stakes_home, stakes_away, derby):
     return p_home / total, p_draw / total, p_away / total
 
 
+def _apply_all_adjustments(p_home, p_draw, p_away, *, home, away, injured_home, injured_away, squad_values,
+                            rest_days_diff, home_points, away_points, home_position, away_position,
+                            stakes_home, stakes_away, derby, odds_1x2, odds_blend):
+    """Applies every requested post-hoc adjustment in sequence to a single model's raw
+    (p_home, p_draw, p_away), and returns the final probabilities plus the printable
+    description lines for each adjustment that was actually applied."""
+    lines = []
+
+    if injured_home or injured_away:
+        p_home, p_draw, p_away, inj_info = _apply_injuries(
+            home, away, p_home, p_draw, p_away, injured_home, injured_away, squad_values
+        )
+        lines.append(f"  + Injuries : {home} missing {list(inj_info['home'])}, {away} missing {list(inj_info['away'])}")
+
+    if rest_days_diff:
+        p_home, p_draw, p_away, rest_factor = _apply_rest_days(p_home, p_draw, p_away, rest_days_diff)
+        lines.append(f"  + Rest : {home} {'+' if rest_days_diff >= 0 else ''}{rest_days_diff}d vs {away} "
+                      f"(impact {rest_factor*100:+.1f}%)")
+
+    if home_points is not None and away_points is not None:
+        p_home, p_draw, p_away, standings_factor = _apply_current_standings(p_home, p_draw, p_away, home_points, away_points)
+        pos_str = (f" ({_ordinal(home_position)} vs {_ordinal(away_position)})" if home_position and away_position else "")
+        lines.append(f"  + Current standings : {home_points}pts vs {away_points}pts{pos_str} (impact {standings_factor*100:+.1f}%)")
+
+    if stakes_home or stakes_away or derby:
+        p_home, p_draw, p_away = _apply_stakes(p_home, p_draw, p_away, stakes_home, stakes_away, derby)
+        derby_str = " + derby" if derby else ""
+        lines.append(f"  + Stakes : {home}={stakes_home or 'neutral'} / {away}={stakes_away or 'neutral'}{derby_str}")
+
+    if odds_1x2:
+        p_home, p_draw, p_away, implied = _apply_odds(p_home, p_draw, p_away, odds_1x2, odds_blend)
+        lines.append(f"  + Market odds (implied) : {implied['1']*100:.1f}% / {implied['X']*100:.1f}% / {implied['2']*100:.1f}% "
+                      f"(blend={odds_blend})")
+
+    return p_home, p_draw, p_away, lines
+
+
+def _print_model_result(label, home, away, p_home, p_draw, p_away, **adjustment_kwargs):
+    """Prints one model's raw prediction, the adjustments applied to it, and its final
+    result -- clearly labeled so it's never confused with another model's numbers."""
+    print(f"\n  === {label} ===")
+    print(f"  Raw model -> Home {p_home*100:.1f}% / Draw {p_draw*100:.1f}% / Away {p_away*100:.1f}%")
+
+    p_home, p_draw, p_away, lines = _apply_all_adjustments(p_home, p_draw, p_away, home=home, away=away, **adjustment_kwargs)
+    for line in lines:
+        print(line)
+
+    print()
+    print(f"  {RESULT_LABELS[2]} {home:<20} {p_home * 100:5.1f}%")
+    print(f"  {RESULT_LABELS[1]:<28} {p_draw * 100:5.1f}%")
+    print(f"  {RESULT_LABELS[0]} {away:<20} {p_away * 100:5.1f}%")
+
+    return {"home": p_home, "draw": p_draw, "away": p_away}
+
+
+def _print_goal_markets(home, away, context, n_scorelines=5):
+    """Prints probable scores / BTTS / over-under, via the Poisson goal model from
+    src/models/markets.py -- INDEPENDENT of the two 1X2 models above (see markets.py
+    docstring): it's a third, separate model, only here because neither classifier can
+    give an exact score by construction."""
+    lambda_home, lambda_away = expected_goals(
+        context["gs_home"], context["gc_home"], context["gs_away"], context["gc_away"]
+    )
+    matrix = goal_matrix(lambda_home, lambda_away)
+
+    print(f"\n  === Derived markets: Poisson goal model (independent of the two models above) ===")
+    print(f"  Expected goals: {home} {lambda_home:.2f} - {lambda_away:.2f} {away}")
+
+    imp = implied_1x2(matrix)
+    print(f"  1X2 implied by this model: Home {imp['home']*100:.1f}% / Draw {imp['draw']*100:.1f}% / "
+          f"Away {imp['away']*100:.1f}% (to compare, not confuse, with the models above)")
+
+    print(f"  Most probable scores:")
+    for i, j, p in top_scorelines(matrix, n=n_scorelines):
+        print(f"    {home} {i} - {j} {away}  ({p*100:.1f}%)")
+
+    btts_probs = btts(matrix)
+    print(f"  BTTS (both teams score) : Yes {btts_probs['yes']*100:.1f}% / No {btts_probs['no']*100:.1f}%")
+
+    for line in OU_LINES:
+        probs = over_under(matrix, line)
+        print(f"  Over/Under {line} : Over {probs['over']*100:.1f}% / Under {probs['under']*100:.1f}%")
+
+
 # ---------------------------------------------------------------------------
 # Prediction
 # ---------------------------------------------------------------------------
 
-def predict_match(home: str, away: str, model=None, scaler=None, state=None,
-                   injured_home=None, injured_away=None, squad_values=None,
+def predict_match(home: str, away: str, lr_model=None, lr_scaler=None, mlp_model=None, mlp_scaler=None,
+                   state=None, injured_home=None, injured_away=None, squad_values=None,
                    rest_days_diff: int = None,
                    home_position: int = None, home_points: int = None,
                    away_position: int = None, away_points: int = None,
                    odds_1x2=None, odds_blend=ODDS_BLEND_WEIGHT,
                    stakes_home: str = None, stakes_away: str = None, derby: bool = False,
                    match_date=None, show_markets: bool = True):
-    """Returns {"home": p, "draw": p, "away": p} and prints a summary.
+    """Prints the prediction of each trained model separately, and returns
+    {"logistic_regression": {"home": p, "draw": p, "away": p}, "mlp": {...}}.
 
     Computed automatically (no input needed): elo, form, home/away form, h2h, goals,
     5-season average rank, fixture congestion (congestion_diff, on match_date - defaults
@@ -260,7 +321,7 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
     underestimates the true fatigue of a team competing on multiple fronts, complement
     with rest_days_diff if you know the real situation better).
 
-    To enter yourself (the model doesn't know about these):
+    To enter yourself (neither model knows about these):
       - injured_home / injured_away: lists of absent player names
       - rest_days_diff: home rest days - away rest days (+2 = home more rested)
       - home_position/home_points, away_position/away_points: CURRENT standings for the
@@ -270,14 +331,19 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
       - derby: True/False -- boosts the draw probability (tight match), doesn't favor either side
 
     show_markets (default True): also shows probable scores / BTTS / over-under via a
-    second model (Poisson on goals, independent of the 1X2 -- see src/models/markets.py).
+    third model (Poisson on goals, independent of the two above -- see src/models/markets.py).
     """
     if state is None:
         _df, state = build_dataset_with_state()
-    if model is None:
-        model = joblib.load(MODEL_PATH)
-    if scaler is None:
-        scaler = joblib.load(SCALER_PATH)
+    if lr_model is None:
+        lr_model = joblib.load(LR_MODEL_PATH)
+    if lr_scaler is None:
+        lr_scaler = joblib.load(LR_SCALER_PATH)
+    if mlp_model is None:
+        mlp_model = MLP(input_dim=len(FEATURE_COLUMNS))
+        mlp_model.load_state_dict(torch.load(MLP_MODEL_PATH))
+    if mlp_scaler is None:
+        mlp_scaler = joblib.load(MLP_SCALER_PATH)
     if squad_values is None:
         squad_values = SQUAD_VALUES
 
@@ -287,42 +353,20 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
 
     features, context = compute_features(home, away, state, match_date=match_date)
     x = np.array([[features[c] for c in FEATURE_COLUMNS]])
-    x_scaled = scaler.transform(x)
-    proba = dict(zip(model.classes_, model.predict_proba(x_scaled)[0]))
-    p_away, p_draw, p_home = proba.get(0, 0.0), proba.get(1, 0.0), proba.get(2, 0.0)
+
+    x_lr = lr_scaler.transform(x)
+    proba_lr = dict(zip(lr_model.classes_, lr_model.predict_proba(x_lr)[0]))
+    p_away_lr, p_draw_lr, p_home_lr = proba_lr.get(0, 0.0), proba_lr.get(1, 0.0), proba_lr.get(2, 0.0)
+
+    x_mlp = mlp_scaler.transform(x).astype(np.float32)
+    proba_mlp = mlp_predict_proba(mlp_model, x_mlp)[0]
+    p_away_mlp, p_draw_mlp, p_home_mlp = float(proba_mlp[0]), float(proba_mlp[1]), float(proba_mlp[2])
 
     print(f"\n{home} (home) vs {away} (away)")
     print(f"  Elo  : {context['elo_home']:.0f} vs {context['elo_away']:.0f}")
     print(f"  Average rank over last {N_SEASONS} seasons : {context['rank_home']:.1f} vs {context['rank_away']:.1f}")
     print(f"  Fixture congestion ({CONGESTION_WINDOW_DAYS}d, PL matches only) : "
           f"{home} {context['congestion_home']} vs {away} {context['congestion_away']}")
-    print(f"  Model only -> Home {p_home*100:.1f}% / Draw {p_draw*100:.1f}% / Away {p_away*100:.1f}%")
-
-    if injured_home or injured_away:
-        p_home, p_draw, p_away, inj_info = _apply_injuries(
-            home, away, p_home, p_draw, p_away, injured_home, injured_away, squad_values
-        )
-        print(f"  + Injuries : {home} missing {list(inj_info['home'])}, {away} missing {list(inj_info['away'])}")
-
-    if rest_days_diff:
-        p_home, p_draw, p_away, rest_factor = _apply_rest_days(p_home, p_draw, p_away, rest_days_diff)
-        print(f"  + Rest : {home} {'+' if rest_days_diff >= 0 else ''}{rest_days_diff}d vs {away} "
-              f"(impact {rest_factor*100:+.1f}%)")
-
-    if home_points is not None and away_points is not None:
-        p_home, p_draw, p_away, standings_factor = _apply_current_standings(p_home, p_draw, p_away, home_points, away_points)
-        pos_str = (f" ({_ordinal(home_position)} vs {_ordinal(away_position)})" if home_position and away_position else "")
-        print(f"  + Current standings : {home_points}pts vs {away_points}pts{pos_str} (impact {standings_factor*100:+.1f}%)")
-
-    if stakes_home or stakes_away or derby:
-        p_home, p_draw, p_away = _apply_stakes(p_home, p_draw, p_away, stakes_home, stakes_away, derby)
-        derby_str = " + derby" if derby else ""
-        print(f"  + Stakes : {home}={stakes_home or 'neutral'} / {away}={stakes_away or 'neutral'}{derby_str}")
-
-    if odds_1x2:
-        p_home, p_draw, p_away, implied = _apply_odds(p_home, p_draw, p_away, odds_1x2, odds_blend)
-        print(f"  + Market odds (implied) : {implied['1']*100:.1f}% / {implied['X']*100:.1f}% / {implied['2']*100:.1f}% "
-              f"(blend={odds_blend})")
 
     no_manual_input = not any([
         injured_home, injured_away, rest_days_diff,
@@ -333,15 +377,25 @@ def predict_match(home: str, away: str, model=None, scaler=None, state=None,
         print("  (!) No manual adjustment provided (injuries, rest, standings, stakes, odds)")
         print("      -> prediction based on history only, not on the matchday context")
 
-    print()
-    print(f"  {RESULT_LABELS[2]} {home:<20} {p_home * 100:5.1f}%")
-    print(f"  {RESULT_LABELS[1]:<28} {p_draw * 100:5.1f}%")
-    print(f"  {RESULT_LABELS[0]} {away:<20} {p_away * 100:5.1f}%")
+    adjustment_kwargs = dict(
+        injured_home=injured_home, injured_away=injured_away, squad_values=squad_values,
+        rest_days_diff=rest_days_diff, home_points=home_points, away_points=away_points,
+        home_position=home_position, away_position=away_position,
+        stakes_home=stakes_home, stakes_away=stakes_away, derby=derby,
+        odds_1x2=odds_1x2, odds_blend=odds_blend,
+    )
+
+    result_lr = _print_model_result(
+        "Model 1/2: Logistic Regression (M3)", home, away, p_home_lr, p_draw_lr, p_away_lr, **adjustment_kwargs
+    )
+    result_mlp = _print_model_result(
+        "Model 2/2: MLP / PyTorch (M4)", home, away, p_home_mlp, p_draw_mlp, p_away_mlp, **adjustment_kwargs
+    )
 
     if show_markets:
-        _print_goal_markets(home, away, context, p_home, p_draw, p_away)
+        _print_goal_markets(home, away, context)
 
-    return {"home": p_home, "draw": p_draw, "away": p_away}
+    return {"logistic_regression": result_lr, "mlp": result_mlp}
 
 
 if __name__ == "__main__":
