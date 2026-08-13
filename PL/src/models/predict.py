@@ -122,6 +122,13 @@ def compute_features(home: str, away: str, state: dict, match_date=None):
     gc_home = _team_goals_avg(home, state["conceded"])
     gs_away = _team_goals_avg(away, state["scored"])
     gc_away = _team_goals_avg(away, state["conceded"])
+    # venue-specific (home team's own HOME record, away team's own AWAY record) -- feeds the
+    # Poisson goal model (markets.py) only, NOT attack_diff/defense_diff above (venue-mixed,
+    # what the trained classifiers use)
+    venue_gs_home = _team_goals_avg(home, state["venue_goals_scored_home"])
+    venue_gc_home = _team_goals_avg(home, state["venue_goals_conceded_home"])
+    venue_gs_away = _team_goals_avg(away, state["venue_goals_scored_away"])
+    venue_gc_away = _team_goals_avg(away, state["venue_goals_conceded_away"])
     clean_sheet_diff = (
         _clean_sheet_rate(home, state["clean_sheet_history"]) - _clean_sheet_rate(away, state["clean_sheet_history"])
     )
@@ -149,6 +156,8 @@ def compute_features(home: str, away: str, state: dict, match_date=None):
         "rank_home": rank_home, "rank_away": rank_away,
         "congestion_home": congestion_home, "congestion_away": congestion_away,
         "gs_home": gs_home, "gc_home": gc_home, "gs_away": gs_away, "gc_away": gc_away,
+        "venue_gs_home": venue_gs_home, "venue_gc_home": venue_gc_home,
+        "venue_gs_away": venue_gs_away, "venue_gc_away": venue_gc_away,
     }
     return features, context
 
@@ -325,7 +334,7 @@ def _print_goal_markets(home, away, context, n_scorelines=5):
     docstring): it's a third, separate model, only here because neither classifier can
     give an exact score by construction."""
     lambda_home, lambda_away = expected_goals(
-        context["gs_home"], context["gc_home"], context["gs_away"], context["gc_away"]
+        context["venue_gs_home"], context["venue_gc_home"], context["venue_gs_away"], context["venue_gc_away"]
     )
     matrix = goal_matrix(lambda_home, lambda_away)
 

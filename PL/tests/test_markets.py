@@ -2,6 +2,7 @@
 probabilities must form valid distributions (sum to 1, etc.)."""
 import numpy as np
 import pytest
+from scipy.stats import poisson
 
 from src.models.markets import btts, expected_goals, goal_matrix, implied_1x2, over_under, top_scorelines
 
@@ -41,7 +42,7 @@ def test_top_scorelines_are_sorted_descending(matrix):
 
 
 def test_expected_goals_never_negative_or_zero():
-    lh, la = expected_goals(gs_home=0.0, gc_home=0.0, gs_away=0.0, gc_away=0.0)
+    lh, la = expected_goals(venue_gs_home=0.0, venue_gc_home=0.0, venue_gs_away=0.0, venue_gc_away=0.0)
     assert lh > 0
     assert la > 0
 
@@ -50,3 +51,19 @@ def test_home_advantage_increases_home_expected_goals():
     lh_with_adv, _ = expected_goals(1.5, 1.0, 1.2, 1.0, home_advantage=1.10)
     lh_no_adv, _ = expected_goals(1.5, 1.0, 1.2, 1.0, home_advantage=1.0)
     assert lh_with_adv > lh_no_adv
+
+
+def test_dixon_coles_correction_keeps_matrix_normalized():
+    # rho != 0 perturbs the 4 low-score cells -- goal_matrix must still renormalize to 1
+    matrix = goal_matrix(LAMBDA_HOME, LAMBDA_AWAY, rho=-0.15)
+    assert matrix.sum() == pytest.approx(1.0)
+    assert (matrix >= 0).all()
+
+
+def test_dixon_coles_rho_zero_matches_plain_independence():
+    matrix_dc = goal_matrix(LAMBDA_HOME, LAMBDA_AWAY, rho=0.0)
+    home_probs = poisson.pmf(np.arange(9), LAMBDA_HOME)
+    away_probs = poisson.pmf(np.arange(9), LAMBDA_AWAY)
+    independent = np.outer(home_probs, away_probs)
+    independent /= independent.sum()
+    assert matrix_dc == pytest.approx(independent)

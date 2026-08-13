@@ -19,6 +19,7 @@ from src.features.build_dataset import FEATURE_COLUMNS, build_dataset_with_state
 from src.features.rolling_stats import CLEAN_SHEET_DEFAULT_RATE, WINDOW
 from src.features.head_to_head import WINDOW as H2H_WINDOW
 from src.features.squad_values import SQUAD_VALUES
+from src.models.markets import DIXON_COLES_RHO, HOME_ADVANTAGE
 from src.models.mlp import MLP
 from src.models.mlp import MODEL_PATH as MLP_MODEL_PATH
 from src.models.mlp import SCALER_PATH as MLP_SCALER_PATH
@@ -80,6 +81,10 @@ def main():
             "away_venue_history": _trim(state["away_venue_history"], WINDOW),
             "scored": _trim(state["scored"], WINDOW),
             "conceded": _trim(state["conceded"], WINDOW),
+            "venue_goals_scored_home": _trim(state["venue_goals_scored_home"], WINDOW),
+            "venue_goals_conceded_home": _trim(state["venue_goals_conceded_home"], WINDOW),
+            "venue_goals_scored_away": _trim(state["venue_goals_scored_away"], WINDOW),
+            "venue_goals_conceded_away": _trim(state["venue_goals_conceded_away"], WINDOW),
             "clean_sheet_history": _trim(state["clean_sheet_history"], WINDOW),
             "h2h_history": h2h_export,
             "standings": standings_export,
@@ -100,6 +105,8 @@ def main():
         "squad_values": SQUAD_VALUES,
         "defaults": {
             "clean_sheet_default_rate": CLEAN_SHEET_DEFAULT_RATE,
+            "home_advantage": HOME_ADVANTAGE,
+            "dixon_coles_rho": DIXON_COLES_RHO,
         },
     }
 

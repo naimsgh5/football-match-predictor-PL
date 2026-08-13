@@ -15,6 +15,7 @@ from src.features.rolling_stats import (
     add_goals_features,
     add_quality_form_features,
     add_venue_form_features,
+    add_venue_goals_features,
 )
 
 RAW_PATH = "data/raw/premier_league_results.csv"
@@ -65,6 +66,7 @@ def build_dataset_with_state(raw_path: str = RAW_PATH):
     df, form_history = add_form_features(df)
     df, home_venue_history, away_venue_history = add_venue_form_features(df)
     df, scored, conceded = add_goals_features(df)
+    df, venue_gs_home, venue_gc_home, venue_gs_away, venue_gc_away = add_venue_goals_features(df)
     df, clean_sheet_history = add_clean_sheet_features(df)
     df, h2h_history = add_h2h_features(df)
     df, standings = add_historical_rank_features(df)
@@ -80,6 +82,10 @@ def build_dataset_with_state(raw_path: str = RAW_PATH):
         "away_venue_history": away_venue_history,
         "scored": scored,
         "conceded": conceded,
+        "venue_goals_scored_home": venue_gs_home,
+        "venue_goals_conceded_home": venue_gc_home,
+        "venue_goals_scored_away": venue_gs_away,
+        "venue_goals_conceded_away": venue_gc_away,
         "clean_sheet_history": clean_sheet_history,
         "h2h_history": h2h_history,
         "standings": standings,
