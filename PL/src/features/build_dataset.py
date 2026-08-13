@@ -15,8 +15,8 @@ from src.features.rolling_stats import (
     add_goals_features,
     add_quality_form_features,
     add_venue_form_features,
-    add_venue_goals_features,
 )
+from src.features.team_ratings import fit_team_ratings
 
 RAW_PATH = "data/raw/premier_league_results.csv"
 OUT_PATH = "data/processed/premier_league_features.parquet"
@@ -66,13 +66,18 @@ def build_dataset_with_state(raw_path: str = RAW_PATH):
     df, form_history = add_form_features(df)
     df, home_venue_history, away_venue_history = add_venue_form_features(df)
     df, scored, conceded = add_goals_features(df)
-    df, venue_gs_home, venue_gc_home, venue_gs_away, venue_gc_away = add_venue_goals_features(df)
     df, clean_sheet_history = add_clean_sheet_features(df)
     df, h2h_history = add_h2h_features(df)
     df, standings = add_historical_rank_features(df)
     df, match_dates = add_congestion_features(df)
 
     last_match_date = {team: max(dates) for team, dates in match_dates.items()}
+
+    # batch fit (not a per-row rolling feature): every team's attack/defense rating "as of
+    # the last known match", for the Poisson goal model (src/models/markets.py) only -- see
+    # src/features/team_ratings.py. Never used as a FEATURE_COLUMNS entry, so this can safely
+    # use the full df without risking leakage into the 1X2 classifiers' training.
+    team_ratings = fit_team_ratings(df)
 
     state = {
         "elo": elo_final,
@@ -82,15 +87,12 @@ def build_dataset_with_state(raw_path: str = RAW_PATH):
         "away_venue_history": away_venue_history,
         "scored": scored,
         "conceded": conceded,
-        "venue_goals_scored_home": venue_gs_home,
-        "venue_goals_conceded_home": venue_gc_home,
-        "venue_goals_scored_away": venue_gs_away,
-        "venue_goals_conceded_away": venue_gc_away,
         "clean_sheet_history": clean_sheet_history,
         "h2h_history": h2h_history,
         "standings": standings,
         "match_dates": match_dates,
         "last_match_date": last_match_date,
+        "team_ratings": team_ratings,
     }
     return df, state
 

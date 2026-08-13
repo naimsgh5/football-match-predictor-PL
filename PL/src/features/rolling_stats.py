@@ -149,48 +149,6 @@ def add_venue_form_features(df: pd.DataFrame, n: int = WINDOW):
     return out, home_history, away_history
 
 
-def add_venue_goals_features(df: pd.DataFrame, n: int = WINDOW, default_avg: float = 1.3):
-    """Rolling average of goals scored/conceded, split by venue: the home team's numbers
-    only come from ITS past HOME matches, the away team's only from ITS past AWAY matches
-    -- unlike attack_diff/defense_diff (add_goals_features above), which pool a team's home
-    and away matches together regardless of where the upcoming match is played.
-
-    Used by the Poisson goal model (src/models/markets.py) so lambda_home/lambda_away
-    reflect each team's own measured home/away scoring split directly, instead of a flat
-    league-wide HOME_ADVANTAGE multiplier applied on top of venue-mixed averages. NOT a
-    training feature (not added to FEATURE_COLUMNS) -- the two classifiers (LR/MLP) keep
-    learning from the venue-mixed attack_diff/defense_diff they were trained on; changing
-    that would mean retraining them, which is a separate decision from improving the
-    (untrained, purely descriptive) goal model."""
-    home_scored: dict[str, list[int]] = {}
-    home_conceded: dict[str, list[int]] = {}
-    away_scored: dict[str, list[int]] = {}
-    away_conceded: dict[str, list[int]] = {}
-    vgs_home, vgc_home, vgs_away, vgc_away = [], [], [], []
-
-    for home, away, hs, aw in zip(df["home_team"], df["away_team"], df["home_score"], df["away_score"]):
-        h_gs = home_scored.get(home, [])
-        h_gc = home_conceded.get(home, [])
-        a_gs = away_scored.get(away, [])
-        a_gc = away_conceded.get(away, [])
-        vgs_home.append(np.mean(h_gs[-n:]) if h_gs else default_avg)
-        vgc_home.append(np.mean(h_gc[-n:]) if h_gc else default_avg)
-        vgs_away.append(np.mean(a_gs[-n:]) if a_gs else default_avg)
-        vgc_away.append(np.mean(a_gc[-n:]) if a_gc else default_avg)
-
-        home_scored.setdefault(home, []).append(hs)
-        home_conceded.setdefault(home, []).append(aw)
-        away_scored.setdefault(away, []).append(aw)
-        away_conceded.setdefault(away, []).append(hs)
-
-    out = df.copy()
-    out["venue_goals_scored_home"] = vgs_home
-    out["venue_goals_conceded_home"] = vgc_home
-    out["venue_goals_scored_away"] = vgs_away
-    out["venue_goals_conceded_away"] = vgc_away
-    return out, home_scored, home_conceded, away_scored, away_conceded
-
-
 def add_congestion_features(df: pd.DataFrame, window_days: int = CONGESTION_WINDOW_DAYS):
     """Proxy for fixture congestion (and thus squad-rotation risk): number of matches
     played by each team in the `window_days` days preceding the current match (excluding

@@ -3,24 +3,21 @@
 This is NOT what the 1X2 model (elo/form/etc. in src/models/predict.py) learns -- it's a
 second, independent, simpler model, only here because the 1X2 classifier can't by
 construction give an exact score or a goals market (it only predicts one of 3 classes:
-home/draw/away). Fed by venue-specific rolling goal averages
-(src/features/rolling_stats.py::add_venue_goals_features): each team's own home-scored /
-home-conceded vs away-scored / away-conceded, NOT the venue-mixed averages used for
-attack_diff/defense_diff -- a team's home and away scoring profile can differ a lot (e.g. a
-side that's hard to beat but low-scoring at home), and mixing them washes that out.
-
-HOME_ADVANTAGE is a residual multiplier on top of the venue split, calibrated per league on
-its own historical data (actual average home goals / model-predicted average home goals with
-no multiplier) -- see calibrate_markets.py. It comes out close to 1.0 once goals are already
-venue-specific: most of what a flat "home advantage" used to compensate for was simply the
-old formula not splitting by venue at all, not a genuinely separate effect.
+home/draw/away). Expected goals (lambda_home/lambda_away) come from
+src/features/team_ratings.py -- a Dixon-Coles/Maher-style joint fit of every team's
+attack/defense strength, split by venue and adjusted for the strength of opponents actually
+faced (unlike a simple rolling average of goals scored/conceded, which can't tell a team
+that's genuinely strong from one that just played weak opposition).
 
 DIXON_COLES_RHO applies the low-score correlation correction from Dixon & Coles (1997) to the
-4 low-scoring cells of the matrix (0-0, 1-0, 0-1, 1-1): plain independent Poisson (P(home
+4 low-scoring cells of the goal matrix (0-0, 1-0, 0-1, 1-1): plain independent Poisson (P(home
 scores i) x P(away scores j)) is known to be biased there specifically, because real matches
 with few goals aren't perfectly independent event-by-event (a team already up 1-0 tends to
-sit back, reducing the away team's remaining chances, etc). Also calibrated per league (max
-log-likelihood on that league's historical low-scoring matches) -- see calibrate_markets.py.
+sit back, reducing the away team's remaining chances, etc). This is a separate, complementary
+correction to the attack/defense ratings above -- it corrects the independence ASSUMPTION
+between the two teams' goal counts, not the expected values themselves. Calibrated per league
+(max log-likelihood on that league's historical low-scoring matches, using each match's
+team_ratings-implied lambda) -- see calibrate_rho.py.
 
 This goal model's implied 1X2 (implied_1x2) is shown as a cross-check against the main
 model's 1X2, but the two can diverge: they're two independent estimates, not the same
@@ -32,21 +29,8 @@ import numpy as np
 from scipy.stats import poisson
 
 MAX_GOALS = 8  # beyond this, negligible probability for a PL match
-HOME_ADVANTAGE = 0.996  # calibrated on data/raw/premier_league_results.csv (see module docstring)
-DIXON_COLES_RHO = -0.026  # calibrated on data/raw/premier_league_results.csv (see module docstring)
+DIXON_COLES_RHO = -0.030  # calibrated on data/raw/premier_league_results.csv (see module docstring)
 OU_LINES = [1.5, 2.5, 3.5]
-
-
-def expected_goals(venue_gs_home, venue_gc_home, venue_gs_away, venue_gc_away,
-                    home_advantage: float = HOME_ADVANTAGE):
-    """Expected goals (Poisson lambda) for each team: average of one team's attack and the
-    other's defense (leakiness), as in a classic football Poisson model -- using each team's
-    own VENUE-SPECIFIC averages (goals scored/conceded specifically at home for the home
-    team, specifically away for the away team), not the venue-mixed ones used for
-    attack_diff/defense_diff."""
-    lambda_home = (venue_gs_home + venue_gc_away) / 2 * home_advantage
-    lambda_away = (venue_gs_away + venue_gc_home) / 2
-    return max(lambda_home, 0.1), max(lambda_away, 0.1)
 
 
 def _dixon_coles_tau(x: int, y: int, lambda_home: float, lambda_away: float, rho: float) -> float:
@@ -116,4 +100,3 @@ def implied_1x2(matrix: np.ndarray) -> dict:
         "draw": float(matrix[i == j].sum()),
         "away": float(matrix[i < j].sum()),
     }
-

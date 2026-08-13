@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 from scipy.stats import poisson
 
-from src.models.markets import btts, expected_goals, goal_matrix, implied_1x2, over_under, top_scorelines
+from src.models.markets import btts, goal_matrix, implied_1x2, over_under, top_scorelines
 
 LAMBDA_HOME, LAMBDA_AWAY = 1.8, 1.1
 
@@ -39,18 +39,6 @@ def test_top_scorelines_are_sorted_descending(matrix):
     scores = top_scorelines(matrix, n=5)
     probs = [p for _, _, p in scores]
     assert probs == sorted(probs, reverse=True)
-
-
-def test_expected_goals_never_negative_or_zero():
-    lh, la = expected_goals(venue_gs_home=0.0, venue_gc_home=0.0, venue_gs_away=0.0, venue_gc_away=0.0)
-    assert lh > 0
-    assert la > 0
-
-
-def test_home_advantage_increases_home_expected_goals():
-    lh_with_adv, _ = expected_goals(1.5, 1.0, 1.2, 1.0, home_advantage=1.10)
-    lh_no_adv, _ = expected_goals(1.5, 1.0, 1.2, 1.0, home_advantage=1.0)
-    assert lh_with_adv > lh_no_adv
 
 
 def test_dixon_coles_correction_keeps_matrix_normalized():

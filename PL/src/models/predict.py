@@ -26,7 +26,8 @@ from src.features.historical_rank import N_SEASONS, average_rank
 from src.features.market_value_injuries import injury_strength, lineup_strength
 from src.features.rolling_stats import CLEAN_SHEET_DEFAULT_RATE, CONGESTION_WINDOW_DAYS, WINDOW as FORM_WINDOW
 from src.features.squad_values import SQUAD_VALUES
-from src.models.markets import OU_LINES, btts, expected_goals, goal_matrix, implied_1x2, over_under, top_scorelines
+from src.features.team_ratings import expected_goals_from_ratings
+from src.models.markets import OU_LINES, btts, goal_matrix, implied_1x2, over_under, top_scorelines
 from src.models.mlp import MLP
 from src.models.mlp import MODEL_PATH as MLP_MODEL_PATH
 from src.models.mlp import SCALER_PATH as MLP_SCALER_PATH
@@ -122,13 +123,6 @@ def compute_features(home: str, away: str, state: dict, match_date=None):
     gc_home = _team_goals_avg(home, state["conceded"])
     gs_away = _team_goals_avg(away, state["scored"])
     gc_away = _team_goals_avg(away, state["conceded"])
-    # venue-specific (home team's own HOME record, away team's own AWAY record) -- feeds the
-    # Poisson goal model (markets.py) only, NOT attack_diff/defense_diff above (venue-mixed,
-    # what the trained classifiers use)
-    venue_gs_home = _team_goals_avg(home, state["venue_goals_scored_home"])
-    venue_gc_home = _team_goals_avg(home, state["venue_goals_conceded_home"])
-    venue_gs_away = _team_goals_avg(away, state["venue_goals_scored_away"])
-    venue_gc_away = _team_goals_avg(away, state["venue_goals_conceded_away"])
     clean_sheet_diff = (
         _clean_sheet_rate(home, state["clean_sheet_history"]) - _clean_sheet_rate(away, state["clean_sheet_history"])
     )
@@ -156,8 +150,6 @@ def compute_features(home: str, away: str, state: dict, match_date=None):
         "rank_home": rank_home, "rank_away": rank_away,
         "congestion_home": congestion_home, "congestion_away": congestion_away,
         "gs_home": gs_home, "gc_home": gc_home, "gs_away": gs_away, "gc_away": gc_away,
-        "venue_gs_home": venue_gs_home, "venue_gc_home": venue_gc_home,
-        "venue_gs_away": venue_gs_away, "venue_gc_away": venue_gc_away,
     }
     return features, context
 
@@ -328,14 +320,13 @@ def _print_model_result(label, home, away, p_home, p_draw, p_away, **adjustment_
     return {"home": p_home, "draw": p_draw, "away": p_away}
 
 
-def _print_goal_markets(home, away, context, n_scorelines=5):
+def _print_goal_markets(home, away, state, n_scorelines=5):
     """Prints probable scores / BTTS / over-under, via the Poisson goal model from
     src/models/markets.py -- INDEPENDENT of the two 1X2 models above (see markets.py
     docstring): it's a third, separate model, only here because neither classifier can
-    give an exact score by construction."""
-    lambda_home, lambda_away = expected_goals(
-        context["venue_gs_home"], context["venue_gc_home"], context["venue_gs_away"], context["venue_gc_away"]
-    )
+    give an exact score by construction. Expected goals come from each team's fitted
+    attack/defense rating (src/features/team_ratings.py), not the 1X2 models' features."""
+    lambda_home, lambda_away = expected_goals_from_ratings(home, away, state["team_ratings"])
     matrix = goal_matrix(lambda_home, lambda_away)
 
     print(f"\n  === Derived markets: Poisson goal model (independent of the two models above) ===")
@@ -457,7 +448,7 @@ def predict_match(home: str, away: str, lr_model=None, lr_scaler=None, mlp_model
     )
 
     if show_markets:
-        _print_goal_markets(home, away, context)
+        _print_goal_markets(home, away, state)
 
     return {"logistic_regression": result_lr, "mlp": result_mlp}
 
