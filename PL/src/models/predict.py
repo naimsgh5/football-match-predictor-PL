@@ -7,7 +7,9 @@ from the final state of the full history, then applies optional *post-hoc* adjus
 (neither model ever learned from these, they only shift the final probability, as in
 algo/CLUBS_LOGISTIC_REGRESSION.ipynb): injuries/market value, rest days, current
 standings/points, bookmaker odds. The same adjustments are applied independently to
-each model's raw prediction.
+each model's raw prediction, AND to the Poisson goal market's expected goals (reshaped
+as multiplicative shifts instead of additive ones -- see _apply_all_goal_adjustments)
+so probable scores/BTTS/over-under react to the matchday context too, not just the 1X2s.
 
 Usage:
     python -m src.models.predict "Arsenal" "Chelsea"
@@ -42,6 +44,23 @@ LINEUP_IMPACT = 0.15         # maximum impact of the confirmed-lineup factor on 
 STANDINGS_IMPACT = 0.15      # maximum impact of the current points gap on the probabilities
 STANDINGS_POINTS_SCALE = 15  # points gap (~15 pts) beyond which the impact saturates
 ODDS_BLEND_WEIGHT = 0.5      # 0 = pure model, 1 = pure odds
+
+# Same signals, reshaped as MULTIPLICATIVE shifts on the Poisson goal model's expected goals
+# (lambda_home/lambda_away) instead of additive shifts on the 1X2 probabilities above --
+# without these, the goal market (probable scores/BTTS/over-under) stayed blind to every
+# manual adjustment even when the 1X2 predictions clearly reacted to them (e.g. an injured
+# striker would lower the home win probability but leave "expected goals" completely
+# untouched). Chosen to be comparable in *order of magnitude* to the probability-impact
+# constants above, not independently calibrated against real goal outcomes -- same heuristic
+# status as the rest of this adjustment system.
+GOALS_INJURY_IMPACT = 0.20
+GOALS_LINEUP_IMPACT = 0.20
+GOALS_REST_IMPACT = 0.10
+GOALS_STANDINGS_IMPACT = 0.15
+GOALS_STAKES_IMPACT = 2.5      # scales STAKES_LEVELS (~0.04-0.06) into a comparable goals swing
+DERBY_GOALS_DAMPENING = 0.08   # a derby tends to be tighter/more cautious -- fewer goals both sides
+GOALS_ODDS_IMPACT = 0.5        # nudges lambdas towards the market's home/away tilt (not an exact match --
+                                # odds only encode a 1X2 signal, not a goals one, see _apply_goal_odds)
 
 
 # ---------------------------------------------------------------------------
@@ -169,9 +188,12 @@ def _apply_rest_days(p_home, p_draw, p_away, rest_days_diff):
 
 
 def _apply_injuries(home, away, p_home, p_draw, p_away, injured_home, injured_away, squad_values):
+    """str_home/str_away are STRENGTH factors (1.0 = full squad, lower = weakened -- see
+    injury_strength), so a home injury (str_home < str_away) must LOWER p_home: delta has to
+    be (str_home - str_away), not the reverse."""
     str_home, missing_home, details_home, _ = injury_strength(home, injured_home or [], squad_values)
     str_away, missing_away, details_away, _ = injury_strength(away, injured_away or [], squad_values)
-    delta = (str_away - str_home) * INJURY_IMPACT
+    delta = (str_home - str_away) * INJURY_IMPACT
     p_home = max(0.01, p_home + delta)
     p_away = max(0.01, p_away - delta)
     total = p_home + p_draw + p_away
@@ -302,6 +324,128 @@ def _apply_all_adjustments(p_home, p_draw, p_away, *, home, away, injured_home, 
     return p_home, p_draw, p_away, lines
 
 
+# ---------------------------------------------------------------------------
+# Post-hoc adjustments for the GOAL market (same inputs/order as above, reshaped as
+# multiplicative shifts on expected goals instead of additive shifts on 1X2 probabilities)
+# ---------------------------------------------------------------------------
+
+def _apply_goal_injuries(lambda_home, lambda_away, home, away, injured_home, injured_away, squad_values):
+    """str_home/str_away are STRENGTH factors (1.0 = full squad, lower = weakened -- see
+    injury_strength), so convert to a "how much weakened" signal (0 = no weakening) before
+    applying it, same convention as _apply_goal_lineup below."""
+    str_home, missing_home, details_home, _ = injury_strength(home, injured_home or [], squad_values)
+    str_away, missing_away, details_away, _ = injury_strength(away, injured_away or [], squad_values)
+    weaken_home = 1.0 - str_home
+    weaken_away = 1.0 - str_away
+    lambda_home *= (1 - weaken_home * GOALS_INJURY_IMPACT) * (1 + weaken_away * GOALS_INJURY_IMPACT)
+    lambda_away *= (1 - weaken_away * GOALS_INJURY_IMPACT) * (1 + weaken_home * GOALS_INJURY_IMPACT)
+    info = {"home": details_home, "away": details_away}
+    return max(lambda_home, 0.1), max(lambda_away, 0.1), info
+
+
+def _apply_goal_lineup(lambda_home, lambda_away, home, away, lineup_home, lineup_away, squad_values):
+    factor_home, actual_home, ref_home, unknown_home = lineup_strength(home, lineup_home or [], squad_values)
+    factor_away, actual_away, ref_away, unknown_away = lineup_strength(away, lineup_away or [], squad_values)
+    weaken_home = 1.0 - factor_home
+    weaken_away = 1.0 - factor_away
+    lambda_home *= (1 - weaken_home * GOALS_LINEUP_IMPACT) * (1 + weaken_away * GOALS_LINEUP_IMPACT)
+    lambda_away *= (1 - weaken_away * GOALS_LINEUP_IMPACT) * (1 + weaken_home * GOALS_LINEUP_IMPACT)
+    info = {
+        "home": (factor_home, actual_home, ref_home, unknown_home),
+        "away": (factor_away, actual_away, ref_away, unknown_away),
+    }
+    return max(lambda_home, 0.1), max(lambda_away, 0.1), info
+
+
+def _apply_goal_rest_days(lambda_home, lambda_away, rest_days_diff):
+    factor = float(np.tanh(rest_days_diff / 7.0) * GOALS_REST_IMPACT)
+    lambda_home *= (1 + factor)
+    lambda_away *= (1 - factor)
+    return max(lambda_home, 0.1), max(lambda_away, 0.1), factor
+
+
+def _apply_goal_standings(lambda_home, lambda_away, home_points, away_points):
+    points_diff = home_points - away_points
+    factor = float(np.tanh(points_diff / STANDINGS_POINTS_SCALE) * GOALS_STANDINGS_IMPACT)
+    lambda_home *= (1 + factor)
+    lambda_away *= (1 - factor)
+    return max(lambda_home, 0.1), max(lambda_away, 0.1), factor
+
+
+def _apply_goal_stakes(lambda_home, lambda_away, stakes_home, stakes_away, derby):
+    boost_home = STAKES_LEVELS.get(stakes_home, 0.0) if stakes_home else 0.0
+    boost_away = STAKES_LEVELS.get(stakes_away, 0.0) if stakes_away else 0.0
+    shift = (boost_home - boost_away) * GOALS_STAKES_IMPACT
+    lambda_home *= (1 + shift)
+    lambda_away *= (1 - shift)
+
+    if derby:
+        lambda_home *= (1 - DERBY_GOALS_DAMPENING)
+        lambda_away *= (1 - DERBY_GOALS_DAMPENING)
+
+    return max(lambda_home, 0.1), max(lambda_away, 0.1)
+
+
+def _apply_goal_odds(lambda_home, lambda_away, odds_1x2):
+    """Odds are a 1X2-shaped signal (no goals information in them), so this only nudges the
+    lambdas in the direction the market favors -- an approximation, not an attempt to force
+    the goal matrix's implied 1X2 to exactly match the market's."""
+    implied = _remove_margin(odds_1x2)
+    tilt = implied["1"] - implied["2"]  # -1..+1, positive = market favors home
+    lambda_home *= (1 + tilt * GOALS_ODDS_IMPACT)
+    lambda_away *= (1 - tilt * GOALS_ODDS_IMPACT)
+    return max(lambda_home, 0.1), max(lambda_away, 0.1), implied
+
+
+def _apply_all_goal_adjustments(lambda_home, lambda_away, *, home, away, injured_home, injured_away, squad_values,
+                                 lineup_home, lineup_away,
+                                 rest_days_diff, home_points, away_points, home_position, away_position,
+                                 stakes_home, stakes_away, derby, odds_1x2, odds_blend):
+    """Applies every requested post-hoc adjustment in sequence to the goal model's raw
+    (lambda_home, lambda_away) -- same inputs, same order as _apply_all_adjustments, so the
+    goal market reacts to the same matchday context as the 1X2 models instead of staying
+    frozen at the historical-ratings estimate. odds_blend is accepted but unused (kept so
+    this can be called with the exact same **adjustment_kwargs dict as the 1X2 version)."""
+    lines = []
+
+    if injured_home or injured_away:
+        lambda_home, lambda_away, inj_info = _apply_goal_injuries(
+            lambda_home, lambda_away, home, away, injured_home, injured_away, squad_values
+        )
+        lines.append(f"  + Injuries : {home} missing {list(inj_info['home'])}, {away} missing {list(inj_info['away'])}")
+
+    if lineup_home or lineup_away:
+        lambda_home, lambda_away, lineup_info = _apply_goal_lineup(
+            lambda_home, lambda_away, home, away, lineup_home, lineup_away, squad_values
+        )
+        fh, ah, rh, uh = lineup_info["home"]
+        fa, aa, ra, ua = lineup_info["away"]
+        home_str = f"{fh*100:.0f}% of best XI" if ah is not None else "unknown"
+        away_str = f"{fa*100:.0f}% of best XI" if aa is not None else "unknown"
+        lines.append(f"  + Lineup : {home} fields {home_str}, {away} fields {away_str}")
+
+    if rest_days_diff:
+        lambda_home, lambda_away, rest_factor = _apply_goal_rest_days(lambda_home, lambda_away, rest_days_diff)
+        lines.append(f"  + Rest : {home} {'+' if rest_days_diff >= 0 else ''}{rest_days_diff}d vs {away} "
+                      f"(impact {rest_factor*100:+.1f}%)")
+
+    if home_points is not None and away_points is not None:
+        lambda_home, lambda_away, standings_factor = _apply_goal_standings(lambda_home, lambda_away, home_points, away_points)
+        pos_str = (f" ({_ordinal(home_position)} vs {_ordinal(away_position)})" if home_position and away_position else "")
+        lines.append(f"  + Current standings : {home_points}pts vs {away_points}pts{pos_str} (impact {standings_factor*100:+.1f}%)")
+
+    if stakes_home or stakes_away or derby:
+        lambda_home, lambda_away = _apply_goal_stakes(lambda_home, lambda_away, stakes_home, stakes_away, derby)
+        derby_str = " + derby" if derby else ""
+        lines.append(f"  + Stakes : {home}={stakes_home or 'neutral'} / {away}={stakes_away or 'neutral'}{derby_str}")
+
+    if odds_1x2:
+        lambda_home, lambda_away, implied = _apply_goal_odds(lambda_home, lambda_away, odds_1x2)
+        lines.append(f"  + Market odds (implied) : {implied['1']*100:.1f}% / {implied['X']*100:.1f}% / {implied['2']*100:.1f}%")
+
+    return lambda_home, lambda_away, lines
+
+
 def _print_model_result(label, home, away, p_home, p_draw, p_away, **adjustment_kwargs):
     """Prints one model's raw prediction, the adjustments applied to it, and its final
     result -- clearly labeled so it's never confused with another model's numbers."""
@@ -320,17 +464,29 @@ def _print_model_result(label, home, away, p_home, p_draw, p_away, **adjustment_
     return {"home": p_home, "draw": p_draw, "away": p_away}
 
 
-def _print_goal_markets(home, away, state, n_scorelines=5):
+def _print_goal_markets(home, away, state, n_scorelines=5, **adjustment_kwargs):
     """Prints probable scores / BTTS / over-under, via the Poisson goal model from
     src/models/markets.py -- INDEPENDENT of the two 1X2 models above (see markets.py
     docstring): it's a third, separate model, only here because neither classifier can
-    give an exact score by construction. Expected goals come from each team's fitted
-    attack/defense rating (src/features/team_ratings.py), not the 1X2 models' features."""
+    give an exact score by construction. Raw expected goals come from each team's fitted
+    attack/defense rating (src/features/team_ratings.py); the same post-hoc adjustments as
+    the 1X2 models (injuries, lineup, rest, standings, stakes, odds) are then applied to
+    lambda_home/lambda_away, so this market reacts to the matchday context too instead of
+    staying frozen at the historical estimate."""
     lambda_home, lambda_away = expected_goals_from_ratings(home, away, state["team_ratings"])
-    matrix = goal_matrix(lambda_home, lambda_away)
 
     print(f"\n  === Derived markets: Poisson goal model (independent of the two models above) ===")
-    print(f"  Expected goals: {home} {lambda_home:.2f} - {lambda_away:.2f} {away}")
+    print(f"  Raw expected goals: {home} {lambda_home:.2f} - {lambda_away:.2f} {away}")
+
+    lambda_home, lambda_away, lines = _apply_all_goal_adjustments(
+        lambda_home, lambda_away, home=home, away=away, **adjustment_kwargs
+    )
+    for line in lines:
+        print(line)
+    if lines:
+        print(f"  Adjusted expected goals: {home} {lambda_home:.2f} - {lambda_away:.2f} {away}")
+
+    matrix = goal_matrix(lambda_home, lambda_away)
 
     imp = implied_1x2(matrix)
     print(f"  1X2 implied by this model: Home {imp['home']*100:.1f}% / Draw {imp['draw']*100:.1f}% / "
@@ -386,6 +542,8 @@ def predict_match(home: str, away: str, lr_model=None, lr_scaler=None, mlp_model
 
     show_markets (default True): also shows probable scores / BTTS / over-under via a
     third model (Poisson on goals, independent of the two above -- see src/models/markets.py).
+    All the manual adjustments above are applied to this market too (reshaped as
+    multiplicative shifts on expected goals rather than additive shifts on 1X2 probabilities).
     """
     if state is None:
         _df, state = build_dataset_with_state()
@@ -448,7 +606,7 @@ def predict_match(home: str, away: str, lr_model=None, lr_scaler=None, mlp_model
     )
 
     if show_markets:
-        _print_goal_markets(home, away, state)
+        _print_goal_markets(home, away, state, **adjustment_kwargs)
 
     return {"logistic_regression": result_lr, "mlp": result_mlp}
 
